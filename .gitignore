@@ -1,0 +1,13 @@
+node_modules/
+playwright-report/
+test-results/
+coverage/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.*
+.DS_Store
+.agent.md

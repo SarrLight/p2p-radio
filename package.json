@@ -1,0 +1,11 @@
+{
+  "name": "p2p-radio-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "e2e": "node e2e/e2e_test.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.40.0"
+  }
+}

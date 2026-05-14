@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>P2P Radio PoC</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:16px;line-height:1.5}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
+    .status{color:#555;font-size:14px}
+    #remotes audio{display:block;margin-top:8px}
+    #local audio{display:block;margin-top:8px}
+  </style>
+</head>
+<body>
+  <h3>P2P Radio PoC（浏览器优先）</h3>
+  <div class="controls">
+    房间: <input id="room" value="test">
+    <button id="join">Join</button>
+    <button id="toggle-mic">麦克风：开</button>
+    <button id="toggle-system">系统声音：关</button>
+  </div>
+  <div class="status" id="status">麦克风默认开启，系统声音默认关闭。</div>
+  <div id="local"></div>
+  <div id="remotes"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
