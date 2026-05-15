@@ -8,6 +8,37 @@ const accessUrlEl = document.getElementById('access-url');
 const playbackMeterFillEl = document.getElementById('playback-meter-fill');
 const playbackMeterTextEl = document.getElementById('playback-meter-text');
 const playbackMeterStateEl = document.getElementById('playback-meter-state');
+const statsRawEl = document.getElementById('stats-raw');
+const statsCopyBtn = document.getElementById('stats-copy-btn');
+const statsCopyStatus = document.getElementById('stats-copy-status');
+
+if (statsCopyBtn) {
+  statsCopyBtn.addEventListener('click', async () => {
+    const text = statsRawEl ? statsRawEl.textContent || '' : '';
+    if (!text) {
+      if (statsCopyStatus) statsCopyStatus.textContent = '暂无数据可复制';
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      if (statsCopyStatus) {
+        statsCopyStatus.textContent = '已复制';
+        setTimeout(() => { statsCopyStatus.textContent = ''; }, 2000);
+      }
+    } catch (e) {
+      if (statsCopyStatus) statsCopyStatus.textContent = '复制失败';
+    }
+  });
+}
 const localContainer = document.getElementById('local');
 const remotes = document.getElementById('remotes');
 
@@ -69,7 +100,12 @@ function ensureLocalPreview() {
 
 async function ensureAudioPipeline() {
   if (!audioContext) {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    // prefer 48kHz sampling for higher quality
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+    } catch (e) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
     mixDestination = audioContext.createMediaStreamDestination();
     mixStream = mixDestination.stream;
     mixTrack = mixStream.getAudioTracks()[0] || null;
@@ -223,13 +259,25 @@ function refreshLocalPreview() {
 function attachCurrentSources(pc) {
   pc._senders = {};
   if (mixTrack && mixStream) {
-    pc._senders.mix = pc.addTrack(mixTrack, mixStream);
+    const sender = pc.addTrack(mixTrack, mixStream);
+    pc._senders.mix = sender;
+    // try to request a higher audio bitrate (e.g., 192 kbps)
+    try {
+      if (sender && sender.getParameters) {
+        const params = sender.getParameters();
+        params.encodings = params.encodings && params.encodings.length ? params.encodings : [{}];
+        params.encodings[0].maxBitrate = 192000; // 192 kbps
+        sender.setParameters(params).catch((e) => console.warn('setParameters failed', e));
+      }
+    } catch (e) {
+      console.warn('setParameters not supported', e);
+    }
   }
 }
 
 // Periodic stats collection and DOM update
 let statsIntervalId = null;
-// store last bytes/timestamp per peer to compute bitrate delta
+// store last bytes/timestamp per peer to compute bitrate delta for in/out
 const _lastStats = {};
 function startStatsPolling(intervalMs = 5000) {
   if (statsIntervalId) return;
@@ -242,9 +290,14 @@ function startStatsPolling(intervalMs = 5000) {
       container.textContent = '无连接';
       return;
     }
+    const allRaw = {};
     for (const [id, pc] of Object.entries(pcMap)) {
       try {
         const stats = await pc.getStats();
+        // collect raw reports for display
+        const reports = {};
+        stats.forEach(r => { reports[r.id || (r.type+'-'+Math.random().toString(36).slice(2,6))] = r; });
+        allRaw[id] = reports;
         let inbound = null, outbound = null, pair = null;
         stats.forEach(r => {
           if (r.type === 'inbound-rtp' && r.kind === 'audio') inbound = r;
@@ -254,31 +307,47 @@ function startStatsPolling(intervalMs = 5000) {
 
         const loss = inbound ? ((inbound.packetsLost||0) / Math.max(1, inbound.packetsReceived||0))*100 : 0;
         const rtt = pair && pair.currentRoundTripTime ? Math.round(pair.currentRoundTripTime*1000) : 0;
-        let bitrate = 0;
+        let outBitrate = 0;
+        let inBitrate = 0;
+        const last = _lastStats[id] || {};
         if (outbound && outbound.bytesSent && outbound.timestamp) {
-          const last = _lastStats[id];
-          if (last && last.bytesSent && last.timestamp && outbound.timestamp > last.timestamp) {
-            const deltaBytes = outbound.bytesSent - last.bytesSent;
-            const deltaSec = (outbound.timestamp - last.timestamp) / 1000;
-            if (deltaSec > 0 && deltaBytes >= 0) {
-              bitrate = Math.round((deltaBytes * 8) / 1000 / deltaSec); // kbps
-            }
+          if (last.outBytes && last.outTs && outbound.timestamp > last.outTs) {
+            const deltaBytes = outbound.bytesSent - last.outBytes;
+            const deltaSec = (outbound.timestamp - last.outTs) / 1000;
+            if (deltaSec > 0 && deltaBytes >= 0) outBitrate = Math.round((deltaBytes * 8) / 1000 / deltaSec);
           }
-          // save latest
-          _lastStats[id] = { bytesSent: outbound.bytesSent, timestamp: outbound.timestamp };
+          last.outBytes = outbound.bytesSent;
+          last.outTs = outbound.timestamp;
         }
+        if (inbound && inbound.bytesReceived && inbound.timestamp) {
+          if (last.inBytes && last.inTs && inbound.timestamp > last.inTs) {
+            const deltaBytes = inbound.bytesReceived - last.inBytes;
+            const deltaSec = (inbound.timestamp - last.inTs) / 1000;
+            if (deltaSec > 0 && deltaBytes >= 0) inBitrate = Math.round((deltaBytes * 8) / 1000 / deltaSec);
+          }
+          last.inBytes = inbound.bytesReceived;
+          last.inTs = inbound.timestamp;
+        }
+        _lastStats[id] = last;
 
         const el = document.createElement('div');
         el.style.padding = '6px 8px';
         el.style.borderBottom = '1px solid #eee';
-        el.innerHTML = `<strong>peer ${id}</strong>: loss=${loss.toFixed(2)}% rtt=${rtt}ms bitrate=${bitrate}kbps`;
+        el.innerHTML = `<strong>peer ${id}</strong>: loss=${loss.toFixed(2)}% rtt=${rtt}ms out=${outBitrate}kbps in=${inBitrate}kbps`;
         container.appendChild(el);
       } catch (e) {
         const el = document.createElement('div');
-        el.textContent = `peer ${id}: stats error`;
+        el.style.color = 'crimson';
+        const msg = e && e.message ? e.message : String(e);
+        el.textContent = `peer ${id}: stats error: ${msg}`;
         container.appendChild(el);
+        if (statsRawEl) {
+          statsRawEl.textContent = `stats error for peer ${id}: ${e && e.stack ? e.stack : msg}`;
+        }
+        console.error('stats error for peer', id, e);
       }
     }
+    if (statsRawEl) statsRawEl.textContent = JSON.stringify(allRaw, null, 2);
   }, intervalMs);
 }
 
@@ -295,7 +364,12 @@ async function enableMic() {
   }
 
   await ensureAudioPipeline();
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  // request higher-quality capture when possible
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 48000, channelCount: 2 } });
+  } catch (e) {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  }
   connectMediaStreamToGain(micStream, micGainNode, 'mic');
   micGainNode.gain.value = 1;
   micEnabled = true;
