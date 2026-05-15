@@ -108,6 +108,10 @@ function mungeOpusSdp(sdp) {
     paramMap['sprop-stereo'] = '1';
     paramMap['maxaveragebitrate'] = '256000';
     paramMap['usedtx'] = '0';
+    // FEC embeds a low-bitrate copy of the previous frame in each packet.
+    // Single-packet loss is recovered from the next packet — much smoother audio.
+    paramMap['useinbandfec'] = '1';
+    paramMap['minptime'] = '10';
 
     const newParams = Object.entries(paramMap)
       .map(([k, v]) => v !== '' ? `${k}=${v}` : k)
@@ -722,6 +726,16 @@ function makePC(peerId) {
   pc.ontrack = async (e) => {
     const stream = e.streams[0];
     console.log(`[${peerId}] ontrack fired, stream has ${stream.getAudioTracks().length} audio tracks`);
+
+    // Larger jitter buffer trades a bit of latency for resistance to
+    // network jitter and burst loss.  300ms is conservative — radio-style
+    // one-way audio can afford it.  (Chrome default is ~50-200ms adaptive.)
+    if (e.receiver && e.receiver.playoutDelayHint !== undefined) {
+      try {
+        e.receiver.playoutDelayHint = 0.3;
+        console.log(`[${peerId}] playoutDelayHint set to 300ms`);
+      } catch (_) {}
+    }
 
     // Only iOS Safari blocks <audio> autoplay for WebRTC streams.
     // All other browsers (Android Chrome, Edge, desktop Chrome, etc.) handle it fine.
