@@ -11,3 +11,10 @@ yarn-error.log*
 .env.*
 .DS_Store
 .agent.md
+server/cert.pem
+server/key.pem
+server/ca-cert.pem
+server/ca-cert.crt
+server/ca-key.pem
+server/*.srl
+server/san.cnf

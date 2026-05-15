@@ -1,12 +1,26 @@
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const WebSocket = require('ws');
 const path = require('path');
+const fs = require('fs');
 const os = require('os');
 const dgram = require('dgram');
 
 const app = express();
 app.use(express.static(path.join(__dirname, '..', 'client')));
+
+// Try to load self-signed certificate (generate with: node generate-cert.js)
+let httpsEnabled = false;
+let server;
+try {
+  const cert = fs.readFileSync(path.join(__dirname, 'cert.pem'));
+  const key = fs.readFileSync(path.join(__dirname, 'key.pem'));
+  server = https.createServer({ cert, key }, app);
+  httpsEnabled = true;
+} catch (_) {
+  server = http.createServer(app);
+}
 
 function isPrivateIPv4(ip) {
   if (/^10\./.test(ip)) return true;
@@ -69,7 +83,7 @@ app.get('/api/access-url', (req, res) => {
     addresses,
     preferredAddress: preferred ? preferred.address : null,
     preferredInterface: preferred ? preferred.interfaceName : null,
-    url: preferred ? `http://${preferred.address}:${port}/` : `http://localhost:${port}/`,
+    url: preferred ? `${httpsEnabled ? 'https' : 'http'}://${preferred.address}:${port}/` : `${httpsEnabled ? 'https' : 'http'}://localhost:${port}/`,
   });
 });
 
@@ -85,7 +99,6 @@ app.get('/api/rooms', (req, res) => {
   res.json({ rooms: result });
 });
 
-const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 let nextClientId = 1;
@@ -212,4 +225,4 @@ stunSocket.bind(STUN_PORT, () => {
 
 // ── Start ───────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Signaling server running on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Server running on ${httpsEnabled ? 'https' : 'http'}://localhost:${PORT}${httpsEnabled ? ' (self-signed cert)' : ''}`));

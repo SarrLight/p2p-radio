@@ -555,9 +555,19 @@ function startStatsPolling(intervalMs = 5000) {
     const container = document.getElementById('stats-container');
     if (!container) return;
     container.innerHTML = '';
+    // Show own identity
+    const myRoleLabel = myRole === 'host' ? '🎤主播' : '🎧听众';
+    const meEl = document.createElement('div');
+    meEl.style.cssText = 'padding:4px 8px;margin-bottom:8px;font-size:12px;color:var(--text-muted)';
+    meEl.textContent = `我的 ID: ${myId || '—'}  ${myRoleLabel}`;
+    container.appendChild(meEl);
+
     const keys = Object.keys(pcMap);
     if (keys.length === 0) {
-      container.textContent = '无连接';
+      const emptyEl = document.createElement('div');
+      emptyEl.textContent = '无连接';
+      emptyEl.style.cssText = 'font-size:13px;color:var(--text-muted)';
+      container.appendChild(emptyEl);
       return;
     }
     const allRaw = {};
