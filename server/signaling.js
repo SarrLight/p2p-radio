@@ -102,7 +102,8 @@ app.get('/api/rooms', (req, res) => {
 const wss = new WebSocket.Server({ server });
 
 let nextClientId = 1;
-const rooms = {}; // room -> Map(clientId -> ws)
+const rooms = {};       // room -> Map(clientId -> ws)
+const roomReactions = {}; // room -> { emoji: count }
 
 wss.on('connection', (ws) => {
   ws.id = null;
@@ -117,7 +118,7 @@ wss.on('connection', (ws) => {
       const { room } = data;
       ws.room = room;
       ws.id = (nextClientId++).toString();
-      if (!rooms[room]) rooms[room] = new Map();
+      if (!rooms[room]) { rooms[room] = new Map(); roomReactions[room] = { '😭': 0, '👍': 0, '❤️': 0, '🥰': 0, '🥳': 0 }; }
 
       // Enforce single host per room: downgrade to listener if a host already exists.
       let yourRole = data.role || 'host';
@@ -136,12 +137,27 @@ wss.on('connection', (ws) => {
       const peers = Array.from(rooms[room].keys());
       rooms[room].set(ws.id, ws);
 
-      ws.send(JSON.stringify({ type: 'joined', id: ws.id, peers, roles, yourRole }));
+      ws.send(JSON.stringify({ type: 'joined', id: ws.id, peers, roles, yourRole, reactionCounts: roomReactions[room] }));
 
       // notify existing peers
       for (const [id, other] of rooms[room]) {
         if (id !== ws.id && other.readyState === WebSocket.OPEN) {
           other.send(JSON.stringify({ type: 'peer-joined', id: ws.id, role: ws.role || 'host' }));
+        }
+      }
+
+    } else if (type === 'reaction') {
+      const room = ws.room;
+      if (!room || !rooms[room]) return;
+      // Increment server-side count
+      const counts = roomReactions[room];
+      if (counts && counts[data.emoji] !== undefined) {
+        counts[data.emoji]++;
+      }
+      // Broadcast to everyone (including sender) with cumulative count
+      for (const [, other] of rooms[room]) {
+        if (other.readyState === WebSocket.OPEN) {
+          other.send(JSON.stringify({ type: 'reaction', emoji: data.emoji, from: ws.id, count: counts[data.emoji] }));
         }
       }
 
@@ -165,7 +181,7 @@ wss.on('connection', (ws) => {
           other.send(JSON.stringify({ type: 'peer-left', id }));
         }
       }
-      if (rooms[room].size === 0) delete rooms[room];
+      if (rooms[room].size === 0) { delete rooms[room]; delete roomReactions[room]; }
     }
   });
 });

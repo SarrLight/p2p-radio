@@ -72,6 +72,9 @@ let myRole = 'host';                // 'host' or 'listener'
 let peerRoles = {};                 // peerId -> role
 let joined = false;                 // true after successful join
 let listenerAudioContext = null;    // minimal AudioContext for listeners on iOS Safari
+let listenerGainNode = null;       // GainNode for mute control on listener playback
+let listenerMuted = false;         // whether playback is muted
+const reactionCounts = { '😭': 0, '👍': 0, '❤️': 0, '🥰': 0, '🥳': 0 };
 let wsReconnectTimer = null;        // setTimeout id for WS reconnection
 let wsReconnectAttempts = 0;        // exponential-backoff counter
 
@@ -243,6 +246,24 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+function ensureListenerGain() {
+  if (!listenerGainNode && listenerAudioContext) {
+    listenerGainNode = listenerAudioContext.createGain();
+    listenerGainNode.gain.value = listenerMuted ? 0 : 1;
+    listenerGainNode.connect(listenerAudioContext.destination);
+  }
+}
+
+function showReaction(emoji) {
+  const el = document.createElement('span');
+  el.className = 'reaction-float';
+  el.textContent = emoji;
+  el.style.left = `${40 + Math.random() * 30}%`;
+  el.style.bottom = '30%';
+  document.body.appendChild(el);
+  el.addEventListener('animationend', () => el.remove());
+}
+
 function ensureLocalPreview() {
   if (!localPreviewAudio) {
     localPreviewAudio = document.createElement('audio');
@@ -351,7 +372,7 @@ async function ensurePlaybackMeter() {
     playbackAnalyser = playbackAudioContext.createAnalyser();
     playbackAnalyser.fftSize = 2048;
     playbackAnalyser.smoothingTimeConstant = 0.85;
-    await playbackAudioContext.resume();
+    playbackAudioContext.resume().catch(() => {});
   }
 
   if (!playbackMeterRaf) {
@@ -871,7 +892,18 @@ function connectWs() {
     if (data.type === 'joined') {
       myId = data.id;
       joined = true;
+      // Persist room+role so a page refresh auto-rejoins
+      try { localStorage.setItem('p2p_room', roomInput.value); } catch (_) {}
+      try { localStorage.setItem('p2p_role', myRole); } catch (_) {}
       if (data.roles) peerRoles = { ...data.roles };
+      // Load accumulated reaction counts from server
+      if (data.reactionCounts) {
+        Object.assign(reactionCounts, data.reactionCounts);
+        for (const [emoji, count] of Object.entries(data.reactionCounts)) {
+          const btn = document.querySelector(`#reaction-bar button[data-emoji="${emoji}"]`);
+          if (btn) btn.querySelector('.rc').textContent = count;
+        }
+      }
 
       // Use the server-assigned role — may differ from what was requested
       // if a host already exists in the room.
@@ -920,6 +952,10 @@ function connectWs() {
       const leaveBtn = document.getElementById('leave');
       if (leaveBtn) leaveBtn.classList.remove('hidden');
 
+      // show reaction bar and mute button
+      document.getElementById('reaction-bar').style.display = 'flex';
+      if (muteBtn) muteBtn.classList.remove('hidden');
+
       // Refresh room list immediately so counts update without waiting for poll
       fetchRooms();
 
@@ -939,7 +975,6 @@ function connectWs() {
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          console.log(`[${data.from}] Applied answer`);
         } catch (e) {
           console.error(`[${data.from}] Error setting remote answer:`, e);
         }
@@ -949,6 +984,12 @@ function connectWs() {
       if (pc && data.candidate) {
         try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch(e){}
       }
+    } else if (data.type === 'reaction') {
+      // Server count is authoritative — sync then show
+      if (data.count !== undefined) reactionCounts[data.emoji] = data.count;
+      const btn = document.querySelector(`#reaction-bar button[data-emoji="${data.emoji}"]`);
+      if (btn) btn.querySelector('.rc').textContent = reactionCounts[data.emoji];
+      showReaction(data.emoji);
     } else if (data.type === 'peer-left') {
       delete peerRoles[data.id];
       closePeer(data.id);
@@ -1033,10 +1074,6 @@ function makePC(peerId) {
   pc.ontrack = async (e) => {
     const stream = e.streams[0];
     console.log(`[${peerId}] ontrack fired, stream has ${stream.getAudioTracks().length} audio tracks`);
-
-    // Large jitter buffer: radio-style one-way audio can afford 500ms latency.
-    // Chrome default is ~50-200ms adaptive, which causes underruns on Wi-Fi.
-    // {min, max} lets the buffer grow when needed without forcing constant high latency.
     if (e.receiver && e.receiver.playoutDelayHint !== undefined) {
       try {
         e.receiver.playoutDelayHint = { min: 0.15, max: 0.5 };
@@ -1076,7 +1113,8 @@ function makePC(peerId) {
         }
         if (ctx && ctx.state === 'running') {
           const source = ctx.createMediaStreamSource(stream);
-          source.connect(ctx.destination);
+          ensureListenerGain();
+          source.connect(listenerGainNode || ctx.destination);
           remoteAudioSources[peerId] = source;
           console.log(`[${peerId}] playing via Web Audio (role=${myRole})`);
         }
@@ -1113,11 +1151,13 @@ function makePC(peerId) {
             listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)();
           }
           if (listenerAudioContext.state !== 'running') {
-            await listenerAudioContext.resume().catch(() => {});
+            listenerAudioContext.resume().catch(() => {}); // fire-and-forget — Safari hangs on await
           }
-          if (listenerAudioContext.state === 'running') {
+          // Always connect; if ctx is suspended, audio starts when user interacts
+          {
             const source = listenerAudioContext.createMediaStreamSource(stream);
-            source.connect(listenerAudioContext.destination);
+            ensureListenerGain();
+            source.connect(listenerGainNode || listenerAudioContext.destination);
             remoteAudioSources[peerId] = source;
             console.log(`[${peerId}] playing via Web Audio fallback`);
           }
@@ -1172,7 +1212,6 @@ async function handleOffer(from, sdp) {
     answer.sdp = mungeOpusSdp(answer.sdp);
     await pc.setLocalDescription(answer);
     ws.send(JSON.stringify({ type: 'answer', to: from, sdp: pc.localDescription }));
-    console.log(`[handleOffer] Sent answer to ${from}`);
   } catch (e) {
     console.error(`[handleOffer] Error handling offer from ${from}:`, e);
   } finally {
@@ -1237,6 +1276,12 @@ joinBtn.onclick = async () => {
   joinBtn.disabled = true;
   document.querySelectorAll('#role-selector button, #room').forEach(el => el.disabled = true);
   document.getElementById('role-selector').style.opacity = '0.5';
+
+  // Save intent immediately during user gesture — Safari may block
+  // localStorage writes inside async WebSocket callbacks.
+  try { localStorage.setItem('p2p_room', roomInput.value); } catch (_) {}
+  try { localStorage.setItem('p2p_role', myRole); } catch (_) {}
+
   connectWs();
   // Role-specific setup is deferred to the 'joined' handler,
   // which knows the server-assigned role (may differ if host conflict).
@@ -1248,6 +1293,11 @@ if (leaveBtn) {
 }
 
 function leaveRoom() {
+  // Clear saved room FIRST — if anything below throws and the page reloads,
+  // we don't want to auto-rejoin.
+  try { localStorage.removeItem('p2p_room'); } catch (_) {}
+  try { localStorage.removeItem('p2p_role'); } catch (_) {}
+
   try {
     // Prevent reconnect attempts
     if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
@@ -1282,6 +1332,7 @@ function leaveRoom() {
     if (listenerAudioContext) {
       listenerAudioContext.close();
       listenerAudioContext = null;
+      listenerGainNode = null;
     }
     if (playbackAudioContext) {
       playbackAudioContext.close();
@@ -1299,7 +1350,6 @@ function leaveRoom() {
     // Reset state
     joined = false;
     myId = undefined;
-    _lastStats = {};
     _lastStats = {};
 
     // Stop polling
@@ -1320,6 +1370,13 @@ function leaveRoom() {
     document.getElementById('host-controls').style.display = 'none';
     document.getElementById('host-meters').style.display = 'none';
     document.getElementById('listener-meters').style.display = 'block';
+    document.getElementById('reaction-bar').style.display = 'none';
+    if (muteBtn) { muteBtn.classList.add('hidden'); muteBtn.textContent = '🔊 收听中'; muteBtn.classList.remove('muted'); }
+    listenerMuted = false;
+    if (listenerGainNode) listenerGainNode.gain.value = 1;
+    // reset reaction counts
+    for (const k of Object.keys(reactionCounts)) reactionCounts[k] = 0;
+    document.querySelectorAll('#reaction-bar .rc').forEach(el => el.textContent = '0');
     toggleMicBtn.disabled = true;
     toggleSystemBtn.disabled = true;
 
@@ -1377,10 +1434,91 @@ roomInput.addEventListener('input', () => {
   updateRoleSelectorForRoom(roomInput.value.trim());
 });
 
+// reaction bar
+document.querySelectorAll('#reaction-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'reaction', emoji: btn.dataset.emoji }));
+    // Server broadcasts back to everyone including sender — no local fallback needed.
+  });
+});
+
+// mute button
+const muteBtn = document.getElementById('mute-btn');
+if (muteBtn) {
+  muteBtn.addEventListener('click', () => {
+    listenerMuted = !listenerMuted;
+    if (listenerGainNode) listenerGainNode.gain.value = listenerMuted ? 0 : 1;
+    document.querySelectorAll('#remotes audio').forEach(a => { a.muted = listenerMuted; });
+    muteBtn.textContent = listenerMuted ? '🔇 已静音' : '🔊 收听中';
+    muteBtn.classList.toggle('muted', listenerMuted);
+  });
+}
+
 toggleMicBtn.disabled = true;
 toggleSystemBtn.disabled = true;
 updateAccessUrl();
 updateStatus();
 startRoomPolling();
+
+// Auto-rejoin on page refresh.
+async function tryAutoRejoin() {
+  try {
+    if (joined) return;
+
+    let savedRoom, savedRole;
+    try { savedRoom = localStorage.getItem('p2p_room'); } catch (_) {}
+    try { savedRole = localStorage.getItem('p2p_role'); } catch (_) {}
+    if (!savedRoom || !savedRole) return;
+
+    roomInput.value = savedRoom;
+    myRole = savedRole;
+
+    if (savedRole === 'host') {
+      document.getElementById('role-host').classList.add('active');
+      document.getElementById('role-listener').classList.remove('active');
+    } else {
+      document.getElementById('role-listener').classList.add('active');
+      document.getElementById('role-host').classList.remove('active');
+      if (!listenerAudioContext || listenerAudioContext.state === 'closed') {
+        try { listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
+      }
+      if (listenerAudioContext) {
+        listenerAudioContext.resume().catch(() => {});
+      }
+    }
+
+    await new Promise(r => setTimeout(r, 200));
+    if (joined) return;
+    joinBtn.click();
+
+    // iOS Safari won't resume AudioContext without a user gesture.
+    window.addEventListener('click', function resumeOnTap() {
+      if (listenerAudioContext && listenerAudioContext.state !== 'running') {
+        listenerAudioContext.resume();
+      }
+      if (playbackAudioContext && playbackAudioContext.state !== 'running') {
+        playbackAudioContext.resume();
+      }
+      const overlay = document.getElementById('tap-to-listen');
+      if (overlay) overlay.remove();
+    }, { once: true });
+
+    const overlay = document.createElement('div');
+    overlay.id = 'tap-to-listen';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer;font-family:system-ui,sans-serif';
+    overlay.innerHTML = '<span style="font-size:22px;color:#fff">👆 点击屏幕继续收听</span>';
+    document.body.appendChild(overlay);
+  } catch (e) {
+    console.error('tryAutoRejoin:', e);
+  }
+}
+
+// Run on pageshow (Safari) or immediately if page already loaded.
+if (document.readyState === 'complete') {
+  tryAutoRejoin();
+} else {
+  window.addEventListener('pageshow', () => tryAutoRejoin());
+}
 
 })();

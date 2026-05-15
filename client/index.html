@@ -96,7 +96,7 @@
     .btn-danger:hover{background:rgba(248,113,113,.25)}
 
     /* ── status ── */
-    #status{font-size:13px;color:var(--text-muted);padding:2px 0}
+    #status{font-size:13px;color:var(--text-muted);padding:2px 0;white-space:pre-wrap}
 
     /* ── meter ── */
     .meter-visual{
@@ -125,6 +125,16 @@
     .input-row .val{width:52px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted)}
     #host-meters{display:none}
     #listener-meters{display:block}
+    #mute-btn{font-size:13px;padding:5px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer;transition:all .15s}
+    #mute-btn:hover{background:rgba(255,255,255,.1)}
+    #mute-btn.muted{color:var(--danger);border-color:rgba(248,113,113,.3)}
+    #reaction-bar{display:none;justify-content:center;gap:4px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06)}
+    #reaction-bar button{font-size:22px;padding:4px 8px;border-radius:10px;border:none;background:transparent;cursor:pointer;transition:transform .12s,background .12s;line-height:1;touch-action:manipulation}
+    #reaction-bar button:hover{transform:scale(1.25);background:rgba(255,255,255,.06)}
+    #reaction-bar button:active{transform:scale(.9)}
+    #reaction-bar button .rc{font-size:10px;margin-left:2px;color:var(--text-muted);font-weight:600;font-variant-numeric:tabular-nums}
+    .reaction-float{position:fixed;font-size:28px;pointer-events:none;z-index:999;animation:float-up 1.8s ease-out forwards}
+    @keyframes float-up{0%{opacity:1;transform:translateY(0) scale(1)}60%{opacity:.8;transform:translateY(-80px) scale(1.15)}100%{opacity:0;transform:translateY(-140px) scale(.8)}}
 
     /* ── peer list ── */
     .peer-item{
@@ -191,6 +201,7 @@
       <input type="text" id="room" value="test" placeholder="电台名">
       <button class="btn-primary" id="join">加入</button>
       <button class="btn-danger hidden" id="leave">离开</button>
+      <button id="mute-btn" class="hidden">🔊 收听中</button>
       <span id="host-controls">
         <button class="btn-ghost" id="toggle-mic">麦克风：关</button>
         <button class="btn-ghost" id="toggle-system" title="仅捕获音频，画面立即丢弃">系统声音：关</button>
@@ -222,6 +233,13 @@
         <div class="meter-db" id="playback-meter-text">-∞ <small>dB</small></div>
       </div>
       <div class="meter-state" id="playback-meter-state">等待音频流…</div>
+    </div>
+    <div id="reaction-bar">
+      <button data-emoji="😭">😭<span class="rc">0</span></button>
+      <button data-emoji="👍">👍<span class="rc">0</span></button>
+      <button data-emoji="❤️">❤️<span class="rc">0</span></button>
+      <button data-emoji="🥰">🥰<span class="rc">0</span></button>
+      <button data-emoji="🥳">🥳<span class="rc">0</span></button>
     </div>
     <div id="peer-summary" style="margin-top:8px"></div>
   </div>
