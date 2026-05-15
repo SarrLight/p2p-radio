@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "e2e": "node e2e/e2e_test.js"
+    "e2e": "node e2e/e2e_test.js",
+    "stress": "node e2e/stress_test.js"
   },
   "devDependencies": {
     "playwright": "^1.40.0"
