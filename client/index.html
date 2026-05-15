@@ -7,12 +7,18 @@
     body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:16px;line-height:1.5}
     .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
     .status{color:#555;font-size:14px}
+    .meter-card{margin:14px 0 18px;padding:12px 14px;border:1px solid #d8d8d8;border-radius:12px;background:#fafafa;max-width:520px}
+    .meter-title{font-size:14px;font-weight:600;color:#222;margin-bottom:10px}
+    .meter-track{height:12px;border-radius:999px;background:#e5e7eb;overflow:hidden}
+    .meter-fill{height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,#22c55e,#16a34a,#15803d);transition:width 80ms linear}
+    .meter-meta{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#555;margin-top:8px;flex-wrap:wrap}
     #remotes audio{display:block;margin-top:8px}
     #local audio{display:block;margin-top:8px}
   </style>
 </head>
 <body>
   <h3>P2P Radio PoC（浏览器优先）</h3>
+  <div class="status" id="access-url"></div>
   <div class="controls">
     房间: <input id="room" value="test">
     <button id="join">Join</button>
@@ -20,6 +26,20 @@
     <button id="toggle-system">系统声音：关</button>
   </div>
   <div class="status" id="status">麦克风默认开启，系统声音默认关闭。</div>
+  <div class="meter-card">
+    <div class="meter-title">当前网页播放响度</div>
+    <div class="meter-track" aria-hidden="true">
+      <div class="meter-fill" id="playback-meter-fill"></div>
+    </div>
+    <div class="meter-meta">
+      <span id="playback-meter-text">0% / -120.0 dBFS</span>
+      <span id="playback-meter-state">未检测到播放声音</span>
+    </div>
+  </div>
+  <div id="stats-panel" style="margin-top:12px;max-width:520px;border:1px solid #eee;border-radius:8px;padding:8px;background:#fff">
+    <div style="font-weight:600;margin-bottom:6px">诊断面板（每 5s 更新）</div>
+    <div id="stats-container" style="font-size:13px;color:#333;min-height:36px">无连接</div>
+  </div>
   <div id="local"></div>
   <div id="remotes"></div>
   <script src="./app.js"></script>

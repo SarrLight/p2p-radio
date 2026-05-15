@@ -2,9 +2,75 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
+const os = require('os');
 
 const app = express();
 app.use(express.static(path.join(__dirname, '..', 'client')));
+
+function isPrivateIPv4(ip) {
+  if (/^10\./.test(ip)) return true;
+  if (/^192\.168\./.test(ip)) return true;
+  const match = ip.match(/^172\.(\d+)\./);
+  if (!match) return false;
+  const second = Number(match[1]);
+  return second >= 16 && second <= 31;
+}
+
+function scoreInterface(name) {
+  const n = String(name || '').toLowerCase();
+
+  // strongly de-prioritize common virtual/tunnel adapters
+  if (n.includes('zerotier') || n.includes('tailscale') || n.includes('vmware') || n.includes('virtual') || n.includes('vbox') || n.includes('docker') || n.includes('hyper-v')) {
+    return -100;
+  }
+
+  // prioritize real NICs
+  if (n.includes('wlan') || n.includes('wi-fi') || n.includes('wifi')) {
+    return 30;
+  }
+  if (n.includes('ethernet') || n.includes('\u4ee5\u592a\u7f51')) {
+    return 20;
+  }
+
+  return 0;
+}
+
+function getLanAddresses() {
+  const addresses = [];
+  const interfaces = os.networkInterfaces();
+
+  for (const [name, interfaceEntries] of Object.entries(interfaces)) {
+    for (const entry of interfaceEntries || []) {
+      if (entry && entry.family === 'IPv4' && !entry.internal) {
+        const isPrivate = isPrivateIPv4(entry.address);
+        addresses.push({
+          address: entry.address,
+          interfaceName: name,
+          isPrivate,
+          score: scoreInterface(name) + (isPrivate ? 10 : 0),
+        });
+      }
+    }
+  }
+
+  addresses.sort((a, b) => b.score - a.score);
+  return addresses;
+}
+
+app.get('/api/access-url', (req, res) => {
+  const port = process.env.PORT || 3000;
+  const addressEntries = getLanAddresses();
+  const addresses = addressEntries.map((item) => item.address);
+  const preferred = addressEntries.find((item) => item.isPrivate && item.score >= 0) || addressEntries[0] || null;
+
+  res.json({
+    port,
+    addresses,
+    preferredAddress: preferred ? preferred.address : null,
+    preferredInterface: preferred ? preferred.interfaceName : null,
+    url: preferred ? `http://${preferred.address}:${port}/` : `http://localhost:${port}/`,
+  });
+});
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
