@@ -1,53 +1,259 @@
 <!doctype html>
-<html>
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <title>P2P Radio PoC</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>P2P Radio</title>
   <style>
-    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:16px;line-height:1.5}
-    .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
-    .status{color:#555;font-size:14px}
-    .meter-card{margin:14px 0 18px;padding:12px 14px;border:1px solid #d8d8d8;border-radius:12px;background:#fafafa;max-width:520px}
-    .meter-title{font-size:14px;font-weight:600;color:#222;margin-bottom:10px}
-    .meter-track{height:12px;border-radius:999px;background:#e5e7eb;overflow:hidden}
-    .meter-fill{height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,#22c55e,#16a34a,#15803d);transition:width 80ms linear}
-    .meter-meta{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#555;margin-top:8px;flex-wrap:wrap}
-    #remotes audio{display:block;margin-top:8px}
-    #local audio{display:block;margin-top:8px}
+    :root {
+      --bg: #0a0a0a;
+      --card: rgba(255,255,255,.04);
+      --card-border: rgba(255,255,255,.06);
+      --text: #e4e4e7;
+      --text-muted: #71717a;
+      --accent: #4ade80;
+      --accent-dim: #166534;
+      --danger: #f87171;
+      --radius: 14px;
+      --gap: 12px;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      background:var(--bg);color:var(--text);line-height:1.55;
+      min-height:100dvh;padding:16px;padding-bottom:40px;
+      -webkit-font-smoothing:antialiased;
+    }
+    /* ── layout ── */
+    .app{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:var(--gap)}
+
+    /* ── header ── */
+    .header{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
+    .header h1{font-size:20px;font-weight:700;letter-spacing:-.02em}
+    .header .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;box-shadow:0 0 8px var(--accent)}
+
+    /* ── card ── */
+    .card{
+      background:var(--card);border:1px solid var(--card-border);
+      border-radius:var(--radius);padding:14px 16px;
+      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    }
+    .card-header{
+      display:flex;align-items:center;justify-content:space-between;
+      margin-bottom:10px;font-size:13px;font-weight:600;
+      color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;
+    }
+
+    /* ── access url ── */
+    #access-url{font-size:12px;color:var(--text-muted);word-break:break-all;text-align:right;max-width:320px}
+
+    /* ── room list ── */
+    #room-list .rl-item{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:10px 12px;border-radius:10px;cursor:pointer;
+      background:rgba(255,255,255,.03);border:1px solid transparent;
+      transition:background .15s,border-color .15s;margin-bottom:6px;
+    }
+    #room-list .rl-item:last-child{margin-bottom:0}
+    #room-list .rl-item:hover{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.08)}
+    #room-list .rl-name{font-weight:600;font-size:15px}
+    #room-list .rl-meta{font-size:12px;color:var(--text-muted)}
+    .rl-empty{color:var(--text-muted);font-size:13px;text-align:center;padding:8px 0}
+    .rl-live{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:6px;box-shadow:0 0 6px var(--accent);animation:pulse 2s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+    /* ── controls ── */
+    .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .controls label{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em}
+    .role-group{display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.1)}
+    .role-btn{
+      padding:6px 14px;border:none;background:transparent;cursor:pointer;
+      font-size:13px;color:var(--text-muted);transition:all .15s;font-weight:500;
+    }
+    .role-btn.active{background:var(--accent);color:#000;font-weight:600}
+    .role-btn:not(.active):hover{background:rgba(255,255,255,.05);color:var(--text)}
+    .role-btn.locked{opacity:.35;cursor:not-allowed;text-decoration:line-through}
+    .role-btn.locked:hover{background:transparent;color:var(--text-muted)}
+
+    input[type=text]{
+      flex:1;min-width:80px;padding:7px 10px;border-radius:8px;
+      border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);
+      color:var(--text);font-size:14px;outline:none;transition:border-color .15s;
+    }
+    input[type=text]:focus{border-color:var(--accent)}
+
+    button{
+      padding:7px 16px;border-radius:8px;border:none;cursor:pointer;
+      font-size:13px;font-weight:600;transition:all .15s;
+    }
+    .btn-primary{background:var(--accent);color:#000}
+    .btn-primary:hover{filter:brightness(1.1)}
+    .btn-primary:disabled{opacity:.35;cursor:not-allowed}
+    .btn-ghost{background:rgba(255,255,255,.06);color:var(--text);border:1px solid rgba(255,255,255,.08)}
+    .btn-ghost:hover{background:rgba(255,255,255,.1)}
+    .btn-ghost:disabled{opacity:.35;cursor:not-allowed}
+    .btn-danger{background:rgba(248,113,113,.15);color:#f87171;border:1px solid rgba(248,113,113,.2)}
+    .btn-danger:hover{background:rgba(248,113,113,.25)}
+
+    /* ── status ── */
+    #status{font-size:13px;color:var(--text-muted);padding:2px 0}
+
+    /* ── meter ── */
+    .meter-visual{
+      display:flex;align-items:center;gap:10px;
+      margin:6px 0 10px;
+    }
+    .meter-bar-outer{
+      flex:1;height:6px;border-radius:999px;
+      background:rgba(255,255,255,.06);overflow:hidden;
+    }
+    .meter-fill{
+      height:100%;width:0%;border-radius:999px;
+      background:linear-gradient(90deg,var(--accent),#22c55e,#16a34a);
+      transition:width 80ms linear;box-shadow:0 0 10px rgba(74,222,128,.3);
+    }
+    .meter-db{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;min-width:80px;text-align:right}
+    .meter-db small{font-size:13px;font-weight:400;color:var(--text-muted)}
+    .meter-state{font-size:12px;color:var(--text-muted)}
+    .meter-state.live{color:var(--accent)}
+    .input-row{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12px}
+    .input-row .label{width:52px;color:var(--text-muted);flex-shrink:0}
+    .input-row .bar{flex:1;height:4px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden}
+    .input-row .bar .fill{height:100%;width:0%;border-radius:999px;transition:width 80ms linear}
+    .input-row .bar .fill.mic{background:var(--accent)}
+    .input-row .bar .fill.system{background:#60a5fa}
+    .input-row .val{width:52px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted)}
+    #host-meters{display:none}
+    #listener-meters{display:block}
+
+    /* ── peer list ── */
+    .peer-item{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);
+      font-size:13px;
+    }
+    .peer-item:last-child{border-bottom:none}
+    .peer-name{font-weight:600}
+    .peer-role{font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06)}
+    .peer-role.host{background:rgba(74,222,128,.12);color:var(--accent)}
+    .peer-stats{font-size:11px;color:var(--text-muted)}
+
+    /* ── diagnostics ── */
+    .diag-toggle{
+      cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;
+      font-size:13px;font-weight:600;color:var(--text-muted);
+    }
+    .diag-toggle:hover{color:var(--text)}
+    .diag-toggle .arrow{transition:transform .2s;font-size:10px}
+    .diag-toggle.open .arrow{transform:rotate(90deg)}
+    .diag-body{display:none;margin-top:8px}
+    .diag-body.open{display:block}
+    #stats-container{font-size:12px;line-height:1.6;margin-bottom:8px}
+    #stats-container div{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px}
+    #stats-raw{
+      max-height:200px;overflow:auto;background:rgba(0,0,0,.4);color:#4ade80;
+      padding:10px;border-radius:8px;font-size:11px;line-height:1.4;
+      font-family:'SF Mono',Fira Code,monospace;white-space:pre-wrap;word-break:break-all;
+    }
+    .diag-actions{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+    .btn-sm{font-size:11px;padding:4px 10px;border-radius:6px}
+    .copy-ok{font-size:11px;color:var(--accent)}
+
+    /* ── utility ── */
+    .hidden{display:none!important}
   </style>
 </head>
 <body>
-  <h3>P2P Radio PoC（浏览器优先）</h3>
-  <div class="status" id="access-url"></div>
-  <div class="controls">
-    房间: <input id="room" value="test">
-    <button id="join">Join</button>
-    <button id="toggle-mic">麦克风：开</button>
-    <button id="toggle-system">系统声音：关</button>
+<div class="app">
+
+  <!-- header -->
+  <div class="header">
+    <h1><span class="dot"></span>P2P Radio</h1>
+    <div class="status" id="access-url"></div>
   </div>
-  <div class="status" id="status">麦克风默认开启，系统声音默认关闭。</div>
-  <div class="meter-card">
-    <div class="meter-title">当前网页播放响度</div>
-    <div class="meter-track" aria-hidden="true">
-      <div class="meter-fill" id="playback-meter-fill"></div>
+
+  <!-- room discovery -->
+  <div class="card" id="room-list">
+    <div class="card-header"><span>📻 活跃电台</span></div>
+    <div class="rl-empty" id="rl-empty">加载中…</div>
+  </div>
+
+  <!-- controls -->
+  <div class="card">
+    <div class="card-header"><span>⚙️ 控制面板</span></div>
+    <div class="controls">
+      <label>角色</label>
+      <span class="role-group" id="role-selector">
+        <button class="role-btn active" id="role-host">🎤 主播</button>
+        <button class="role-btn" id="role-listener">🎧 听众</button>
+      </span>
+      <label>电台</label>
+      <input type="text" id="room" value="test" placeholder="电台名">
+      <button class="btn-primary" id="join">加入</button>
+      <button class="btn-danger hidden" id="leave">离开</button>
+      <span id="host-controls">
+        <button class="btn-ghost" id="toggle-mic">麦克风：关</button>
+        <button class="btn-ghost" id="toggle-system" title="仅捕获音频，画面立即丢弃">系统声音：关</button>
+      </span>
     </div>
-    <div class="meter-meta">
-      <span id="playback-meter-text">0% / -120.0 dBFS</span>
-      <span id="playback-meter-state">未检测到播放声音</span>
+    <div class="status" id="status" style="margin-top:8px">请选择角色后加入电台。</div>
+  </div>
+
+  <!-- playback -->
+  <div class="card" id="playback-card">
+    <div class="card-header"><span>🔊 播放状态</span></div>
+    <div id="host-meters">
+      <div class="input-row">
+        <span class="label">🎤 麦克风</span>
+        <div class="bar"><div class="fill mic" id="mic-meter-fill"></div></div>
+        <span class="val" id="mic-meter-val">-∞ dBFS</span>
+      </div>
+      <div class="input-row">
+        <span class="label">🔊 系统</span>
+        <div class="bar"><div class="fill system" id="sys-meter-fill"></div></div>
+        <span class="val" id="sys-meter-val">-∞ dBFS</span>
+      </div>
+    </div>
+    <div id="listener-meters">
+      <div class="meter-visual">
+        <div class="meter-bar-outer">
+          <div class="meter-fill" id="playback-meter-fill"></div>
+        </div>
+        <div class="meter-db" id="playback-meter-text">-∞ <small>dB</small></div>
+      </div>
+      <div class="meter-state" id="playback-meter-state">等待音频流…</div>
+    </div>
+    <div id="peer-summary" style="margin-top:8px"></div>
+  </div>
+
+  <!-- diagnostics -->
+  <div class="card" id="stats-panel">
+    <div class="diag-toggle" id="diag-toggle">
+      <span class="arrow">▶</span> 诊断面板（每 5s 更新）
+    </div>
+    <div class="diag-body" id="diag-body">
+      <div id="stats-container">无连接</div>
+      <div class="diag-actions">
+        <button class="btn-ghost btn-sm" id="stats-copy-btn">复制调试信息</button>
+        <span class="copy-ok" id="stats-copy-status"></span>
+      </div>
+      <pre id="stats-raw">等待数据...</pre>
     </div>
   </div>
-  <div id="stats-panel" style="margin-top:12px;max-width:520px;border:1px solid #eee;border-radius:8px;padding:8px;background:#fff">
-    <div style="font-weight:600;margin-bottom:6px">诊断面板（每 5s 更新）</div>
-    <div id="stats-container" style="font-size:13px;color:#333;min-height:36px">无连接</div>
-    <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-      <div style="font-weight:600;color:#333">详细调试信息（JSON）</div>
-      <button id="stats-copy-btn" style="font-size:12px;padding:4px 8px;border-radius:6px;">复制调试信息</button>
-      <div id="stats-copy-status" style="font-size:12px;color:#666"></div>
-    </div>
-    <pre id="stats-raw" style="max-height:240px;overflow:auto;background:#111;color:#0f0;padding:8px;border-radius:6px;font-size:12px;line-height:1.3">等待数据...</pre>
-  </div>
+
+  <!-- audio elements (hidden) -->
   <div id="local"></div>
   <div id="remotes"></div>
-  <script src="./app.js"></script>
+
+</div>
+
+<script>
+// collapsible diagnostics
+document.getElementById('diag-toggle').addEventListener('click', function(){
+  this.classList.toggle('open');
+  document.getElementById('diag-body').classList.toggle('open');
+});
+</script>
+<script src="./app.js"></script>
 </body>
 </html>

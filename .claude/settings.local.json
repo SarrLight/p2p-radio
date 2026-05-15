@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(node -c signaling.js)",
+      "Bash(node -c app.js)",
+      "Bash(node signaling.js)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(curl -s http://localhost:3000/api/rooms)",
+      "Bash(kill %1)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //PID 39292 //F)"
     ]
   }
 }

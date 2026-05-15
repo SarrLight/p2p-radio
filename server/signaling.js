@@ -73,6 +73,18 @@ app.get('/api/access-url', (req, res) => {
   });
 });
 
+app.get('/api/rooms', (req, res) => {
+  const result = {};
+  for (const [roomName, clientMap] of Object.entries(rooms)) {
+    const clients = [];
+    for (const [id, clientWs] of clientMap) {
+      clients.push({ id, role: clientWs.role || 'host' });
+    }
+    result[roomName] = { clients };
+  }
+  res.json({ rooms: result });
+});
+
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
@@ -94,15 +106,29 @@ wss.on('connection', (ws) => {
       ws.id = (nextClientId++).toString();
       if (!rooms[room]) rooms[room] = new Map();
 
+      // Enforce single host per room: downgrade to listener if a host already exists.
+      let yourRole = data.role || 'host';
+      if (yourRole === 'host') {
+        for (const [, pws] of rooms[room]) {
+          if (pws.role === 'host') { yourRole = 'listener'; break; }
+        }
+      }
+      ws.role = yourRole;
+
+      // build roles snapshot for the joining client
+      const roles = {};
+      for (const [pid, pws] of rooms[room]) {
+        roles[pid] = pws.role || 'host';
+      }
       const peers = Array.from(rooms[room].keys());
       rooms[room].set(ws.id, ws);
 
-      ws.send(JSON.stringify({ type: 'joined', id: ws.id, peers }));
+      ws.send(JSON.stringify({ type: 'joined', id: ws.id, peers, roles, yourRole }));
 
       // notify existing peers
       for (const [id, other] of rooms[room]) {
         if (id !== ws.id && other.readyState === WebSocket.OPEN) {
-          other.send(JSON.stringify({ type: 'peer-joined', id: ws.id }));
+          other.send(JSON.stringify({ type: 'peer-joined', id: ws.id, role: ws.role || 'host' }));
         }
       }
 
