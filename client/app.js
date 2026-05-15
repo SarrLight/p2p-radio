@@ -64,8 +64,50 @@ let playbackAudioContext = null;
 let playbackAnalyser = null;
 let playbackMeterRaf = 0;
 let playbackStreamSources = new Map();
+let remoteAudioSources = {}; // peerId -> MediaStreamAudioSourceNode (for Safari-compatible playback)
 
 const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+// Inject Opus music-optimized parameters into SDP.
+// Without this, Opus defaults to VOIP mode (high-pass filter ~80Hz, mono, low target bitrate).
+function mungeOpusSdp(sdp) {
+  const opusPTs = new Set();
+  const re = /a=rtpmap:(\d+) opus\//gi;
+  let m;
+  while ((m = re.exec(sdp)) !== null) {
+    opusPTs.add(m[1]);
+  }
+  if (opusPTs.size === 0) return sdp;
+
+  return sdp.replace(/a=fmtp:(\d+) ([^\r\n]*)/g, (match, pt, params) => {
+    if (!opusPTs.has(pt)) return match;
+
+    const paramMap = {};
+    for (const p of params.split(';')) {
+      const pTrim = p.trim();
+      if (!pTrim) continue;
+      const eqIdx = pTrim.indexOf('=');
+      if (eqIdx >= 0) {
+        paramMap[pTrim.substring(0, eqIdx).trim()] = pTrim.substring(eqIdx + 1).trim();
+      } else {
+        paramMap[pTrim] = '';
+      }
+    }
+
+    // Music-optimized Opus: stereo, higher target bitrate, no DTX.
+    // VBR (default) gives better quality than CBR for music — complex passages get more bits.
+    paramMap['stereo'] = '1';
+    paramMap['sprop-stereo'] = '1';
+    paramMap['maxaveragebitrate'] = '256000';
+    paramMap['usedtx'] = '0';
+
+    const newParams = Object.entries(paramMap)
+      .map(([k, v]) => v !== '' ? `${k}=${v}` : k)
+      .join(';');
+
+    return `a=fmtp:${pt} ${newParams}`;
+  });
+}
 
 function updateAccessUrl() {
   if (!accessUrlEl) {
@@ -258,20 +300,71 @@ function refreshLocalPreview() {
 
 function attachCurrentSources(pc) {
   pc._senders = {};
-  if (mixTrack && mixStream) {
-    const sender = pc.addTrack(mixTrack, mixStream);
-    pc._senders.mix = sender;
-    // try to request a higher audio bitrate (e.g., 192 kbps)
-    try {
+  // attach mic track directly with low bitrate (16 kbps)
+  if (micStream) {
+    const micTrack = micStream.getAudioTracks()[0];
+    if (micTrack) {
+      const sender = pc.addTrack(micTrack, micStream);
+      pc._senders.mic = sender;
+      console.log(`[attachCurrentSources] Added mic sender to peer`);
+      try {
+        if (sender && sender.getParameters) {
+          const params = sender.getParameters();
+          params.encodings = params.encodings && params.encodings.length ? params.encodings : [{}];
+          params.encodings[0].maxBitrate = 16000; // 16 kbps for mic
+          sender.setParameters(params).catch(() => {});
+        }
+      } catch (e) {}
+    }
+  } else {
+    console.log(`[attachCurrentSources] micStream not ready yet`);
+  }
+}
+
+function addSystemAudioSender(pc) {
+  if (!pc || !systemStream) {
+    console.log(`[addSystemAudioSender] Skipped: pc=${!!pc}, systemStream=${!!systemStream}`);
+    return;
+  }
+  try {
+    if (pc._senders && pc._senders.system) {
+      console.log(`[addSystemAudioSender] Already exists, skipping`);
+      return; // already added
+    }
+    const systemTrack = systemStream.getAudioTracks()[0];
+    console.log(`[addSystemAudioSender] systemTrack=${!!systemTrack}`);
+    if (systemTrack) {
+      pc._senders = pc._senders || {};
+      const sender = pc.addTrack(systemTrack, systemStream);
+      pc._senders.system = sender;
+      console.log(`[addSystemAudioSender] Added system sender to peer, will trigger negotiationneeded`);
+      // set high bitrate for system audio (320 kbps)
       if (sender && sender.getParameters) {
         const params = sender.getParameters();
         params.encodings = params.encodings && params.encodings.length ? params.encodings : [{}];
-        params.encodings[0].maxBitrate = 192000; // 192 kbps
-        sender.setParameters(params).catch((e) => console.warn('setParameters failed', e));
+        params.encodings[0].maxBitrate = 320000; // 320 kbps for system
+        sender.setParameters(params).catch(() => {});
       }
-    } catch (e) {
-      console.warn('setParameters not supported', e);
+      // addTrack automatically triggers negotiationneeded if in 'stable' state
     }
+  } catch (e) {
+    console.warn('addSystemAudioSender failed', e);
+  }
+}
+
+function removeSystemAudioSender(pc) {
+  if (!pc || !pc._senders || !pc._senders.system) {
+    console.log(`[removeSystemAudioSender] Skipped: pc=${!!pc}, has system=${!!(pc && pc._senders && pc._senders.system)}`);
+    return;
+  }
+  try {
+    console.log(`[removeSystemAudioSender] Removing system sender`);
+    pc.removeTrack(pc._senders.system);
+    pc._senders.system = null;
+    console.log(`[removeSystemAudioSender] Removed system sender, will trigger negotiationneeded`);
+    // removeTrack automatically triggers negotiationneeded if in 'stable' state
+  } catch (e) {
+    console.warn('removeSystemAudioSender failed', e);
   }
 }
 
@@ -298,42 +391,116 @@ function startStatsPolling(intervalMs = 5000) {
         const reports = {};
         stats.forEach(r => { reports[r.id || (r.type+'-'+Math.random().toString(36).slice(2,6))] = r; });
         allRaw[id] = reports;
-        let inbound = null, outbound = null, pair = null;
+        
+        // Collect ALL inbound/outbound RTP tracks, not just the first one
+        const inbounds = [];
+        const outbounds = [];
+        let pair = null;
         stats.forEach(r => {
-          if (r.type === 'inbound-rtp' && r.kind === 'audio') inbound = r;
-          if (r.type === 'outbound-rtp' && r.kind === 'audio') outbound = r;
+          if (r.type === 'inbound-rtp' && r.kind === 'audio') inbounds.push(r);
+          if (r.type === 'outbound-rtp' && r.kind === 'audio') outbounds.push(r);
           if (r.type === 'candidate-pair' && r.nominated) pair = r;
         });
+        
+        // Use first of each for backward compatibility, but prepare data for all
+        const inbound = inbounds.length > 0 ? inbounds[0] : null;
+        const outbound = outbounds.length > 0 ? outbounds[0] : null;
 
         const loss = inbound ? ((inbound.packetsLost||0) / Math.max(1, inbound.packetsReceived||0))*100 : 0;
         const rtt = pair && pair.currentRoundTripTime ? Math.round(pair.currentRoundTripTime*1000) : 0;
-        let outBitrate = 0;
-        let inBitrate = 0;
-        const last = _lastStats[id] || {};
-        if (outbound && outbound.bytesSent && outbound.timestamp) {
-          if (last.outBytes && last.outTs && outbound.timestamp > last.outTs) {
-            const deltaBytes = outbound.bytesSent - last.outBytes;
-            const deltaSec = (outbound.timestamp - last.outTs) / 1000;
-            if (deltaSec > 0 && deltaBytes >= 0) outBitrate = Math.round((deltaBytes * 8) / 1000 / deltaSec);
+        
+        // Calculate bitrate for all inbound and outbound tracks separately
+        const last = _lastStats[id] || { inTracks: {}, outTracks: {} };
+        let totalInBitrate = 0;
+        let totalOutBitrate = 0;
+        const inBitrates = {};
+        const outBitrates = {};
+        
+        // Calculate bitrate for each inbound RTP track
+        inbounds.forEach((ib, idx) => {
+          const trackKey = `in_${idx}`;
+          const lastTrack = last.inTracks[trackKey] || {};
+          let bitrate = 0;
+          if (ib && ib.bytesReceived && ib.timestamp) {
+            if (lastTrack.bytes && lastTrack.ts && ib.timestamp > lastTrack.ts) {
+              const deltaBytes = ib.bytesReceived - lastTrack.bytes;
+              const deltaSec = (ib.timestamp - lastTrack.ts) / 1000;
+              if (deltaSec > 0 && deltaBytes >= 0) bitrate = Math.round((deltaBytes * 8) / 1000 / deltaSec);
+            }
+            lastTrack.bytes = ib.bytesReceived;
+            lastTrack.ts = ib.timestamp;
           }
-          last.outBytes = outbound.bytesSent;
-          last.outTs = outbound.timestamp;
-        }
-        if (inbound && inbound.bytesReceived && inbound.timestamp) {
-          if (last.inBytes && last.inTs && inbound.timestamp > last.inTs) {
-            const deltaBytes = inbound.bytesReceived - last.inBytes;
-            const deltaSec = (inbound.timestamp - last.inTs) / 1000;
-            if (deltaSec > 0 && deltaBytes >= 0) inBitrate = Math.round((deltaBytes * 8) / 1000 / deltaSec);
+          inBitrates[trackKey] = bitrate;
+          totalInBitrate += bitrate;
+          last.inTracks[trackKey] = lastTrack;
+        });
+        
+        // Calculate bitrate for each outbound RTP track
+        outbounds.forEach((ob, idx) => {
+          const trackKey = `out_${idx}`;
+          const lastTrack = last.outTracks[trackKey] || {};
+          let bitrate = 0;
+          if (ob && ob.bytesSent && ob.timestamp) {
+            if (lastTrack.bytes && lastTrack.ts && ob.timestamp > lastTrack.ts) {
+              const deltaBytes = ob.bytesSent - lastTrack.bytes;
+              const deltaSec = (ob.timestamp - lastTrack.ts) / 1000;
+              if (deltaSec > 0 && deltaBytes >= 0) bitrate = Math.round((deltaBytes * 8) / 1000 / deltaSec);
+            }
+            lastTrack.bytes = ob.bytesSent;
+            lastTrack.ts = ob.timestamp;
           }
-          last.inBytes = inbound.bytesReceived;
-          last.inTs = inbound.timestamp;
-        }
+          outBitrates[trackKey] = bitrate;
+          totalOutBitrate += bitrate;
+          last.outTracks[trackKey] = lastTrack;
+        });
+        
         _lastStats[id] = last;
 
+        // Extract additional metrics
+        const outCodec = outbound && outbound.mimeType ? outbound.mimeType.split('/').pop() : 'unknown';
+        const inCodec = inbound && inbound.mimeType ? inbound.mimeType.split('/').pop() : 'unknown';
+        const jitter = inbound && inbound.jitter ? (inbound.jitter*1000).toFixed(2) : 'N/A';
+        const audioLevel = inbound && inbound.audioLevel !== undefined ? (inbound.audioLevel*100).toFixed(1) : 'N/A';
+        const availableOutBitrate = pair && pair.availableOutgoingBitrate ? Math.round(pair.availableOutgoingBitrate/1000) : 'N/A';
+        const connState = pc.connectionState || 'N/A';
+        const iceState = pc.iceConnectionState || 'N/A';
+        
+        // Summarize on first line
         const el = document.createElement('div');
-        el.style.padding = '6px 8px';
-        el.style.borderBottom = '1px solid #eee';
-        el.innerHTML = `<strong>peer ${id}</strong>: loss=${loss.toFixed(2)}% rtt=${rtt}ms out=${outBitrate}kbps in=${inBitrate}kbps`;
+        el.style.padding = '8px';
+        el.style.marginBottom = '8px';
+        el.style.borderLeft = '3px solid #4f46e5';
+        el.style.background = '#f9fafb';
+        el.style.borderRadius = '4px';
+        
+        // Add track count information
+        const senderCount = pc._senders ? Object.keys(pc._senders).filter(k => pc._senders[k]).length : 0;
+        const inboundCount = inbounds.length;
+        const outboundCount = outbounds.length;
+        
+        const firstLine = `<strong>peer ${id}</strong> | 连接: ${connState} | ICE: ${iceState} | 📡 发送${senderCount}轨 | 📨 收${inboundCount}轨 | 📤 送${outboundCount}轨`;
+        const secondLine = `📊 Loss: ${loss.toFixed(2)}% | RTT: ${rtt}ms | 抖动: ${jitter}ms`;
+        
+        // Format track bitrates
+        const outBitsList = Object.keys(outBitrates).map(k => outBitrates[k]).join(',');
+        const inBitsList = Object.keys(inBitrates).map(k => inBitrates[k]).join(',');
+        const thirdLine = outbounds.length > 1 || inbounds.length > 1
+          ? `📤 Out: [${outBitsList}] kbps | 📥 In: [${inBitsList}] kbps`
+          : `📤 Out: ${totalOutBitrate}kbps (${outCodec}) | 📥 In: ${totalInBitrate}kbps (${inCodec})`;
+        const fourthLine = `🔊 Level: ${audioLevel}% | 可用: ${availableOutBitrate} kbps`;
+        
+        // Calculate total bytes and packets from all tracks
+        let totalInBytes = 0, totalInPackets = 0, totalOutBytes = 0, totalOutPackets = 0;
+        inbounds.forEach(ib => {
+          if (ib.bytesReceived) totalInBytes += ib.bytesReceived;
+          if (ib.packetsReceived) totalInPackets += ib.packetsReceived;
+        });
+        outbounds.forEach(ob => {
+          if (ob.bytesSent) totalOutBytes += ob.bytesSent;
+          if (ob.packetsSent) totalOutPackets += ob.packetsSent;
+        });
+        const fifthLine = `📨 收: ${(totalInBytes/1024).toFixed(1)}KB (${totalInPackets}包) | 📬 发: ${(totalOutBytes/1024).toFixed(1)}KB (${totalOutPackets}包)`;
+        el.innerHTML = `${firstLine}<br/>${secondLine}<br/>${thirdLine}<br/>${fourthLine}<br/>${fifthLine}`;
         container.appendChild(el);
       } catch (e) {
         const el = document.createElement('div');
@@ -401,7 +568,15 @@ async function enableSystemAudio() {
   }
 
   await ensureAudioPipeline();
-  const captureStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  const captureStream = await navigator.mediaDevices.getDisplayMedia({
+    video: true,
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 2,
+    }
+  });
   const audioTrack = getAudioTrack(captureStream);
 
   if (!audioTrack) {
@@ -411,8 +586,14 @@ async function enableSystemAudio() {
 
   systemStream = captureStream;
   systemEnabled = true;
+  console.log(`[enableSystemAudio] System audio enabled, pcMap has ${Object.keys(pcMap).length} peers`);
   connectMediaStreamToGain(systemStream, systemGainNode, 'system');
   systemGainNode.gain.value = 1;
+  // dynamically add system sender to all existing peers
+  for (const [id, pc] of Object.entries(pcMap)) {
+    console.log(`[enableSystemAudio] Adding system sender to peer ${id}`);
+    addSystemAudioSender(pc);
+  }
   captureStream.getTracks().forEach((track) => {
     track.addEventListener('ended', () => {
       if (systemEnabled) {
@@ -432,6 +613,10 @@ function disableSystemAudio() {
   systemEnabled = false;
   if (systemGainNode) {
     systemGainNode.gain.value = 0;
+  }
+  // dynamically remove system sender from all existing peers
+  for (const pc of Object.values(pcMap)) {
+    removeSystemAudioSender(pc);
   }
   detachSourceNodes('system');
   if (systemStream) {
@@ -462,7 +647,14 @@ function connectWs() {
       await handleOffer(data.from, data.sdp);
     } else if (data.type === 'answer') {
       const pc = pcMap[data.from];
-      if (pc) pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      if (pc) {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          console.log(`[${data.from}] Applied answer`);
+        } catch (e) {
+          console.error(`[${data.from}] Error setting remote answer:`, e);
+        }
+      }
     } else if (data.type === 'ice') {
       const pc = pcMap[data.from];
       if (pc && data.candidate) {
@@ -476,22 +668,102 @@ function connectWs() {
 
 function makePC(peerId) {
   const pc = new RTCPeerConnection(servers);
+  pc._negotiationInProgress = false;
   attachCurrentSources(pc);
+  // if system audio is already enabled, add system sender immediately
+  if (systemEnabled) {
+    addSystemAudioSender(pc);
+  }
+
+  // If we have no audio tracks to send, create a receive-only transceiver.
+  // This ensures the SDP always has an audio m-line — critical for Safari
+  // which may reject incoming audio if the offer doesn't declare audio capability.
+  const hasAudioSender = pc.getSenders().some(s => s.track && s.track.kind === 'audio');
+  if (!hasAudioSender) {
+    pc.addTransceiver('audio', { direction: 'recvonly' });
+  }
   pc.onicecandidate = (e) => {
     if (e.candidate) {
       ws.send(JSON.stringify({ type: 'ice', to: peerId, candidate: e.candidate }));
     }
   };
-  pc.ontrack = (e) => {
-    let audio = document.getElementById('audio-' + peerId);
-    if (!audio) {
-      audio = document.createElement('audio');
-      audio.id = 'audio-' + peerId;
-      audio.autoplay = true;
-      remotes.appendChild(audio);
+  
+  // Handle negotiationneeded event
+  pc.onnegotiationneeded = async () => {
+    if (pc._negotiationInProgress) {
+      console.log(`[${peerId}] negotiation already in progress, skipping`);
+      return;
     }
-    audio.srcObject = e.streams[0];
-    registerPlaybackStream(peerId, e.streams[0]).catch((error) => {
+    try {
+      pc._negotiationInProgress = true;
+      console.log(`[${peerId}] onnegotiationneeded triggered`);
+      const offer = await pc.createOffer();
+      offer.sdp = mungeOpusSdp(offer.sdp);
+      await pc.setLocalDescription(offer);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log(`[${peerId}] Sending renegotiation offer`);
+        ws.send(JSON.stringify({ type: 'offer', to: peerId, sdp: pc.localDescription }));
+      }
+    } catch (e) {
+      console.error(`[${peerId}] negotiation error:`, e);
+    } finally {
+      pc._negotiationInProgress = false;
+    }
+  };
+  
+  pc.ontrack = async (e) => {
+    const stream = e.streams[0];
+    console.log(`[${peerId}] ontrack fired, stream has ${stream.getAudioTracks().length} audio tracks`);
+
+    // Only iOS Safari blocks <audio> autoplay for WebRTC streams.
+    // All other browsers (Android Chrome, Edge, desktop Chrome, etc.) handle it fine.
+    // Web Audio API is only used for iOS Safari because it bypasses the autoplay block.
+    // NOTE: On iOS Safari, Web Audio routes WebRTC to the earpiece; headphones needed.
+    const isIOSSafari = /Safari/i.test(navigator.userAgent) &&
+      !/CriOS|FxiOS|EdgiOS|OPiOS|Chrome/i.test(navigator.userAgent) &&
+      (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+    if (isIOSSafari) {
+      // iOS Safari: use Web Audio API (only path that works without user gesture)
+      try {
+        if (remoteAudioSources[peerId]) {
+          remoteAudioSources[peerId].disconnect();
+        }
+        if (audioContext && audioContext.state !== 'running') {
+          await audioContext.resume().catch(() => {});
+        }
+        if (audioContext && audioContext.state === 'running') {
+          const source = audioContext.createMediaStreamSource(stream);
+          source.connect(audioContext.destination);
+          remoteAudioSources[peerId] = source;
+          console.log(`[${peerId}] iOS Safari: playing via Web Audio API`);
+        }
+      } catch (err) {
+        console.warn(`[${peerId}] Web Audio playback failed`, err);
+      }
+    } else {
+      // All other browsers: use <audio> element (works reliably everywhere)
+      let audio = document.getElementById('audio-' + peerId);
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'audio-' + peerId;
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.setAttribute('playsinline', '');
+        remotes.appendChild(audio);
+      }
+      audio.srcObject = stream;
+      audio.play().catch(() => {});
+
+      // Clean up any stale Web Audio source (avoid double playback)
+      if (remoteAudioSources[peerId]) {
+        try { remoteAudioSources[peerId].disconnect(); } catch(e) {}
+        delete remoteAudioSources[peerId];
+      }
+    }
+
+    registerPlaybackStream(peerId, stream).catch((error) => {
       console.error('Failed to register playback stream', error);
     });
   };
@@ -500,18 +772,42 @@ function makePC(peerId) {
 }
 
 async function createOffer(peerId) {
-  const pc = makePC(peerId);
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  ws.send(JSON.stringify({ type: 'offer', to: peerId, sdp: pc.localDescription }));
+  let pc = pcMap[peerId];
+  if (!pc) {
+    pc = makePC(peerId);
+  }
+  try {
+    pc._negotiationInProgress = true;
+    const offer = await pc.createOffer();
+    offer.sdp = mungeOpusSdp(offer.sdp);
+    await pc.setLocalDescription(offer);
+    ws.send(JSON.stringify({ type: 'offer', to: peerId, sdp: pc.localDescription }));
+    console.log(`[createOffer] Sent initial offer to ${peerId}`);
+  } catch (e) {
+    console.error(`[createOffer] Error creating offer for ${peerId}:`, e);
+  } finally {
+    pc._negotiationInProgress = false;
+  }
 }
 
 async function handleOffer(from, sdp) {
-  const pc = makePC(from);
-  await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  ws.send(JSON.stringify({ type: 'answer', to: from, sdp: pc.localDescription }));
+  let pc = pcMap[from];
+  if (!pc) {
+    pc = makePC(from);
+  }
+  try {
+    pc._negotiationInProgress = true;
+    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    const answer = await pc.createAnswer();
+    answer.sdp = mungeOpusSdp(answer.sdp);
+    await pc.setLocalDescription(answer);
+    ws.send(JSON.stringify({ type: 'answer', to: from, sdp: pc.localDescription }));
+    console.log(`[handleOffer] Sent answer to ${from}`);
+  } catch (e) {
+    console.error(`[handleOffer] Error handling offer from ${from}:`, e);
+  } finally {
+    pc._negotiationInProgress = false;
+  }
 }
 
 function closePeer(id) {
@@ -519,6 +815,10 @@ function closePeer(id) {
   if (pc) {
     pc.close();
     delete pcMap[id];
+  }
+  if (remoteAudioSources[id]) {
+    try { remoteAudioSources[id].disconnect(); } catch(e) {}
+    delete remoteAudioSources[id];
   }
   unregisterPlaybackStream(id);
   const audio = document.getElementById('audio-' + id);
