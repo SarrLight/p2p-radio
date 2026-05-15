@@ -66,7 +66,15 @@ let playbackMeterRaf = 0;
 let playbackStreamSources = new Map();
 let remoteAudioSources = {}; // peerId -> MediaStreamAudioSourceNode (for Safari-compatible playback)
 
-const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+// Local STUN first (embedded in signaling server – works without internet access),
+// Google STUN as fallback for when clients are on different LANs.
+const stunUrl = `stun:${location.hostname}:3478`;
+const servers = {
+  iceServers: [
+    { urls: stunUrl },
+    { urls: 'stun:stun.l.google.com:19302' }
+  ]
+};
 
 // Inject Opus music-optimized parameters into SDP.
 // Without this, Opus defaults to VOIP mode (high-pass filter ~80Hz, mono, low target bitrate).

@@ -3,6 +3,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
 const os = require('os');
+const dgram = require('dgram');
 
 const app = express();
 app.use(express.static(path.join(__dirname, '..', 'client')));
@@ -130,5 +131,59 @@ wss.on('connection', (ws) => {
   });
 });
 
+// ── Embedded STUN server ─────────────────────────────────────────────
+// Answers Binding Requests on UDP so that clients behind the same campus
+// router can discover their RFC 1918 address.  No external dependency.
+const STUN_MAGIC = 0x2112A442;
+const BINDING_REQUEST  = 0x0001;
+const BINDING_RESPONSE = 0x0101;
+const XOR_MAPPED_ADDRESS = 0x0020;
+
+function buildStunResponse(req, rinfo) {
+  if (req.length < 20) return null;
+  if (req.readUInt16BE(0) !== BINDING_REQUEST) return null;
+  if (req.readUInt32BE(4) !== STUN_MAGIC) return null;
+
+  const tid = req.slice(8, 20); // transaction id
+  const ip = rinfo.address.split('.').map(Number);
+
+  // XOR-MAPPED-ADDRESS: family=IPv4, x-port, x-ip
+  const xPort   = rinfo.port ^ (STUN_MAGIC >>> 16);
+  const attrLen = 8;                         // 4 + family(1) + port(2) + ip(4)
+  const msgLen  = 4 + attrLen;
+  const buf = Buffer.alloc(20 + 4 + attrLen);
+
+  buf.writeUInt16BE(BINDING_RESPONSE, 0);
+  buf.writeUInt16BE(msgLen, 2);
+  buf.writeUInt32BE(STUN_MAGIC, 4);
+  tid.copy(buf, 8);
+
+  let off = 20;
+  buf.writeUInt16BE(XOR_MAPPED_ADDRESS, off); off += 2;
+  buf.writeUInt16BE(attrLen, off);            off += 2;
+  buf[off++] = 0;                             // reserved
+  buf[off++] = 0x01;                          // IPv4
+  buf.writeUInt16BE(xPort, off);              off += 2;
+  for (let i = 0; i < 4; i++) {
+    buf[off++] = ip[i] ^ ((STUN_MAGIC >> ((3 - i) * 8)) & 0xFF);
+  }
+
+  return buf;
+}
+
+const STUN_PORT = process.env.STUN_PORT || 3478;
+const stunSocket = dgram.createSocket('udp4');
+stunSocket.on('message', (msg, rinfo) => {
+  const res = buildStunResponse(msg, rinfo);
+  if (res) stunSocket.send(res, rinfo.port, rinfo.address);
+});
+stunSocket.on('error', (err) => {
+  console.warn('STUN socket error (non-fatal):', err.message);
+});
+stunSocket.bind(STUN_PORT, () => {
+  console.log(`STUN server on UDP :${STUN_PORT}`);
+});
+
+// ── Start ───────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Signaling server running on http://localhost:${PORT}`));
