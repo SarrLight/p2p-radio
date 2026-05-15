@@ -78,12 +78,12 @@ const reactionCounts = { '😭': 0, '👍': 0, '❤️': 0, '🥰': 0, '🥳': 0
 let wsReconnectTimer = null;        // setTimeout id for WS reconnection
 let wsReconnectAttempts = 0;        // exponential-backoff counter
 
-// Local STUN first (embedded in signaling server – works without internet access),
-// Google STUN as fallback for when clients are on different LANs.
-const stunUrl = `stun:${location.hostname}:3478`;
+// ICE servers: local STUN takes the LAN IP from /api/access-url so it works
+// even when the page is accessed via Cloudflare / reverse proxy.  Google STUN
+// as fallback for when the local one is unreachable.
 const servers = {
   iceServers: [
-    { urls: stunUrl },
+    { urls: '' }, // placeholder — filled by updateAccessUrl
     { urls: 'stun:stun.l.google.com:19302' }
   ]
 };
@@ -148,6 +148,11 @@ function updateAccessUrl() {
         accessUrlEl.textContent = `手机访问地址（推荐）：${data.url}${interfaceText}`;
       } else {
         accessUrlEl.textContent = `当前访问地址：${location.origin}`;
+      }
+      // Update local STUN to use server's actual LAN IP instead of location.hostname.
+      // This fixes STUN when the page is accessed via Cloudflare Tunnel / reverse proxy.
+      if (data && data.preferredAddress) {
+        servers.iceServers[0].urls = `stun:${data.preferredAddress}:3478`;
       }
     })
     .catch(() => {
@@ -1089,6 +1094,8 @@ function connectWs() {
       // Persist room+role so a page refresh auto-rejoins
       try { localStorage.setItem('p2p_room', roomInput.value); } catch (_) {}
       try { localStorage.setItem('p2p_role', myRole); } catch (_) {}
+      // Update URL hash so the user can copy & share the link
+      try { history.replaceState(null, '', '#' + roomInput.value); } catch (_) {}
       if (data.roles) peerRoles = { ...data.roles };
       // Load accumulated reaction counts from server
       if (data.reactionCounts) {
@@ -1497,6 +1504,7 @@ function leaveRoom() {
   // we don't want to auto-rejoin.
   try { localStorage.removeItem('p2p_room'); } catch (_) {}
   try { localStorage.removeItem('p2p_role'); } catch (_) {}
+  try { history.replaceState(null, '', location.pathname); } catch (_) {}
 
   try {
     // Prevent reconnect attempts
@@ -1664,9 +1672,28 @@ if (muteBtn) {
   });
 }
 
+// copy shareable link
+document.getElementById('copy-link').addEventListener('click', async () => {
+  const url = location.origin + '/' + '#' + encodeURIComponent(roomInput.value.trim() || 'test');
+  try {
+    await navigator.clipboard.writeText(url);
+    statusEl.textContent = '链接已复制：' + url;
+    setTimeout(() => updateStatus(), 3000);
+  } catch (_) {
+    statusEl.textContent = '复制失败，请手动复制地址栏链接';
+  }
+});
+
 toggleMicBtn.disabled = true;
 toggleSystemBtn.disabled = true;
 updateAccessUrl();
+// If URL has a hash (shared link), pre-fill the room name
+const hashRoom = (() => { try { return decodeURIComponent(location.hash.slice(1)); } catch(_) { return ''; } })();
+if (hashRoom && !joined) {
+  roomInput.value = hashRoom;
+  updateRoleSelectorForRoom(hashRoom);
+}
+
 updateStatus();
 startRoomPolling();
 
