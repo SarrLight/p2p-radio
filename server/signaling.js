@@ -121,10 +121,14 @@ wss.on('connection', (ws) => {
       if (!rooms[room]) { rooms[room] = new Map(); roomReactions[room] = { '😭': 0, '👍': 0, '❤️': 0, '🥰': 0, '🥳': 0 }; }
 
       // Enforce single host per room: downgrade to listener if a host already exists.
+      // Clean up stale hosts whose WebSocket is no longer open (e.g. page refresh).
       let yourRole = data.role || 'host';
-      if (yourRole === 'host') {
-        for (const [, pws] of rooms[room]) {
-          if (pws.role === 'host') { yourRole = 'listener'; break; }
+      for (const [pid, pws] of rooms[room]) {
+        if (pws.role !== 'host') continue;
+        if (pws.readyState !== WebSocket.OPEN) {
+          rooms[room].delete(pid); // dead connection — remove
+        } else if (yourRole === 'host') {
+          yourRole = 'listener';   // live host already present
         }
       }
       ws.role = yourRole;
@@ -143,6 +147,29 @@ wss.on('connection', (ws) => {
       for (const [id, other] of rooms[room]) {
         if (id !== ws.id && other.readyState === WebSocket.OPEN) {
           other.send(JSON.stringify({ type: 'peer-joined', id: ws.id, role: ws.role || 'host' }));
+        }
+      }
+
+    } else if (type === 'leave') {
+      // Client is navigating away — clean up immediately so a refresh
+      // doesn't race with the TCP close event.
+      if (ws.room && rooms[ws.room]) {
+        rooms[ws.room].delete(ws.id);
+        for (const [, other] of rooms[ws.room]) {
+          if (other.readyState === WebSocket.OPEN) {
+            other.send(JSON.stringify({ type: 'peer-left', id: ws.id }));
+          }
+        }
+        if (rooms[ws.room].size === 0) { delete rooms[ws.room]; delete roomReactions[ws.room]; }
+      }
+      ws.room = null; ws.id = null;
+
+    } else if (type === 'firework') {
+      const room = ws.room;
+      if (!room || !rooms[room]) return;
+      for (const [, other] of rooms[room]) {
+        if (other !== ws && other.readyState === WebSocket.OPEN) {
+          other.send(JSON.stringify({ type: 'firework', from: ws.id }));
         }
       }
 
@@ -174,7 +201,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     const { room, id } = ws;
-    if (room && rooms[room]) {
+    if (room && rooms[room] && rooms[room].has(id)) {
       rooms[room].delete(id);
       for (const [otherId, other] of rooms[room]) {
         if (other.readyState === WebSocket.OPEN) {

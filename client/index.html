@@ -133,6 +133,9 @@
     #reaction-bar button:hover{transform:scale(1.25);background:rgba(255,255,255,.06)}
     #reaction-bar button:active{transform:scale(.9)}
     #reaction-bar button .rc{font-size:10px;margin-left:2px;color:var(--text-muted);font-weight:600;font-variant-numeric:tabular-nums}
+    #firework-btn{font-size:20px;padding:4px 10px;border-radius:10px;border:1px solid rgba(250,204,21,.4);background:rgba(250,204,21,.08);cursor:pointer;transition:all .15s;line-height:1;touch-action:manipulation}
+    #firework-btn:hover{background:rgba(250,204,21,.2);transform:scale(1.1)}
+    #firework-btn:active{transform:scale(.9)}
     .reaction-float{position:fixed;font-size:28px;pointer-events:none;z-index:999;animation:float-up 1.8s ease-out forwards}
     @keyframes float-up{0%{opacity:1;transform:translateY(0) scale(1)}60%{opacity:.8;transform:translateY(-80px) scale(1.15)}100%{opacity:0;transform:translateY(-140px) scale(.8)}}
 
@@ -240,6 +243,7 @@
       <button data-emoji="❤️">❤️<span class="rc">0</span></button>
       <button data-emoji="🥰">🥰<span class="rc">0</span></button>
       <button data-emoji="🥳">🥳<span class="rc">0</span></button>
+      <button id="firework-btn" class="hidden" title="放烟花">🎆</button>
     </div>
     <div id="peer-summary" style="margin-top:8px"></div>
   </div>
