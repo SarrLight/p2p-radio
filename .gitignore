@@ -20,3 +20,4 @@ server/*.srl
 server/san.cnf
 *.bak
 caddy.exe
+.ddns_aliyun.json
