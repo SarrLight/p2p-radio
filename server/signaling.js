@@ -10,15 +10,19 @@ const dgram = require('dgram');
 const app = express();
 app.use(express.static(path.join(__dirname, '..', 'client')));
 
-// Try to load self-signed certificate (generate with: node generate-cert.js)
+// Caddy handles HTTPS; backend runs plain HTTP when behind reverse proxy
 let httpsEnabled = false;
 let server;
-try {
-  const cert = fs.readFileSync(path.join(__dirname, 'cert.pem'));
-  const key = fs.readFileSync(path.join(__dirname, 'key.pem'));
-  server = https.createServer({ cert, key }, app);
-  httpsEnabled = true;
-} catch (_) {
+if (!process.env.REVERSE_PROXY) {
+  try {
+    const cert = fs.readFileSync(path.join(__dirname, 'cert.pem'));
+    const key = fs.readFileSync(path.join(__dirname, 'key.pem'));
+    server = https.createServer({ cert, key }, app);
+    httpsEnabled = true;
+  } catch (_) {
+    server = http.createServer(app);
+  }
+} else {
   server = http.createServer(app);
 }
 
@@ -73,17 +77,20 @@ function getLanAddresses() {
 }
 
 app.get('/api/access-url', (req, res) => {
-  const port = process.env.PORT || 3000;
+  const port = parseInt(process.env.PORT || '3000', 10);
   const addressEntries = getLanAddresses();
   const addresses = addressEntries.map((item) => item.address);
   const preferred = addressEntries.find((item) => item.isPrivate && item.score >= 0) || addressEntries[0] || null;
+  const proto = httpsEnabled ? 'https' : 'http';
+  const host = preferred ? preferred.address : 'localhost';
+  const showPort = !((httpsEnabled && port === 443) || (!httpsEnabled && port === 80));
 
   res.json({
     port,
     addresses,
     preferredAddress: preferred ? preferred.address : null,
     preferredInterface: preferred ? preferred.interfaceName : null,
-    url: preferred ? `${httpsEnabled ? 'https' : 'http'}://${preferred.address}:${port}/` : `${httpsEnabled ? 'https' : 'http'}://localhost:${port}/`,
+    url: `${proto}://${host}${showPort ? ':' + port : ''}/`,
   });
 });
 
@@ -115,9 +122,17 @@ wss.on('connection', (ws) => {
     const { type } = data;
 
     if (type === 'join') {
-      const { room } = data;
+      const room = (data.room || '').trim();
+      if (!room) { ws.send(JSON.stringify({ type: 'error', message: '电台名称不能为空' })); return; }
+
+      // Remove any previous entry for this WebSocket (prevents self-downgrade on re-join or reconnect)
+      if (ws.room && rooms[ws.room] && rooms[ws.room].has(ws.id)) {
+        rooms[ws.room].delete(ws.id);
+        if (rooms[ws.room].size === 0) { delete rooms[ws.room]; delete roomReactions[ws.room]; }
+      }
+
       ws.room = room;
-      ws.id = (nextClientId++).toString();
+      if (!ws.id) ws.id = (nextClientId++).toString();
       if (!rooms[room]) { rooms[room] = new Map(); roomReactions[room] = { '😭': 0, '👍': 0, '❤️': 0, '🥰': 0, '🥳': 0 }; }
 
       // Enforce single host per room: downgrade to listener if a host already exists.
@@ -268,4 +283,4 @@ stunSocket.bind(STUN_PORT, () => {
 
 // ── Start ───────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on ${httpsEnabled ? 'https' : 'http'}://localhost:${PORT}${httpsEnabled ? ' (self-signed cert)' : ''}`));
+server.listen(PORT, () => console.log(`Server running on ${httpsEnabled ? 'https' : 'http'}://localhost:${PORT}`));

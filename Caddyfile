@@ -1,0 +1,10 @@
+{
+    servers :443 {
+        protocols h1 h2
+    }
+}
+
+zju-radio.thid.top {
+    tls E:\code\p2p-radio\server\cert.pem E:\code\p2p-radio\server\key.pem
+    reverse_proxy localhost:3000
+}

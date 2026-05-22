@@ -18,3 +18,5 @@ server/ca-cert.crt
 server/ca-key.pem
 server/*.srl
 server/san.cnf
+*.bak
+caddy.exe

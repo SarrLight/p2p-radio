@@ -199,6 +199,7 @@ async function fetchRooms() {
       item.innerHTML = `<span class="rl-name">${escapeHtml(name)}</span>
         <span class="rl-meta">🎤${hosts} 主播 · 🎧${listeners} 听众</span>`;
       item.addEventListener('click', () => {
+        if (joined) return;
         roomInput.value = name;
         updateRoleSelectorForRoom(name);
       });
@@ -219,14 +220,14 @@ function updateRoleSelectorForRoom(roomName) {
   const listenerBtn = document.getElementById('role-listener');
   if (!hostBtn || !listenerBtn) return;
 
-  if (info && info.hasHost) {
-    // Room already has a host — force listener
+  if (info && info.hasHost && myRole !== 'host') {
+    // Room already has a host and we are not it — force listener
     hostBtn.disabled = true;
     hostBtn.classList.add('locked');
     listenerBtn.classList.add('active');
     hostBtn.classList.remove('active');
     myRole = 'listener';
-  } else {
+  } else if (!info || !info.hasHost) {
     hostBtn.disabled = false;
     hostBtn.classList.remove('locked');
   }
@@ -1007,6 +1008,10 @@ async function enableSystemAudio() {
   }
 
   await ensureAudioPipeline();
+
+  // Reassure users: video is never transmitted — only audio is captured.
+  alert('请选择要共享的桌面或窗口。\n\n✅ 勾选底部"共享系统音频"或"共享标签页音频"\n🛡️ 画面仅用于系统弹出选择框，所有视频数据会被立即丢弃，不会传输或录制。');
+
   const captureStream = await navigator.mediaDevices.getDisplayMedia({
     video: true,
     audio: {
@@ -1091,6 +1096,7 @@ function connectWs() {
     if (data.type === 'joined') {
       myId = data.id;
       joined = true;
+      document.getElementById('room-list').classList.add('disabled');
       // Persist room+role so a page refresh auto-rejoins
       try { localStorage.setItem('p2p_room', roomInput.value); } catch (_) {}
       try { localStorage.setItem('p2p_role', myRole); } catch (_) {}
@@ -1480,6 +1486,9 @@ async function restartIce(pc, peerId) {
 
 joinBtn.onclick = async () => {
   if (joined) { console.warn('Already joined, ignoring click'); return; }
+  const roomName = roomInput.value.trim();
+  if (!roomName) { statusEl.textContent = '请输入电台名称'; return; }
+  roomInput.value = roomName;
   joinBtn.disabled = true;
   document.querySelectorAll('#role-selector button, #room').forEach(el => el.disabled = true);
   document.getElementById('role-selector').style.opacity = '0.5';
@@ -1572,6 +1581,7 @@ function leaveRoom() {
     joinBtn.classList.remove('hidden');
     if (leaveBtn) leaveBtn.classList.add('hidden');
     joinBtn.disabled = false;
+    document.getElementById('room-list').classList.remove('disabled');
     document.querySelectorAll('#role-selector button, #room').forEach(el => el.disabled = false);
     document.getElementById('role-host').classList.remove('locked');
     document.getElementById('role-selector').style.opacity = '1';
