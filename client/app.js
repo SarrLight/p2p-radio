@@ -1077,8 +1077,10 @@ function disableSystemAudio() {
 }
 
 function connectWs() {
-  const url = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host;
+  const url = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws';
+  console.log('connectWs URL:', url, 'location.host:', location.host, 'location.protocol:', location.protocol);
   ws = new WebSocket(url);
+  console.log('WebSocket created, readyState:', ws.readyState);
   ws.onopen = () => {
     wsReconnectAttempts = 0;
     if (wsReconnectTimer) {
@@ -1208,12 +1210,13 @@ function connectWs() {
       closePeer(data.id);
     }
   };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
+    console.warn('WebSocket closed', { code: ev?.code, reason: ev?.reason, wasClean: ev?.wasClean, joined });
     if (!joined) return; // deliberate leave or never joined — don't reconnect
     scheduleWsReconnect();
   };
-  ws.onerror = () => {
-    // onclose will fire after this; the reconnect is handled there
+  ws.onerror = (ev) => {
+    console.error('WebSocket error', ev);
   };
 }
 
@@ -1712,6 +1715,10 @@ async function tryAutoRejoin() {
   try {
     if (joined) return;
 
+    // If opened via a shared link (#hash), that's a fresh intent — don't restore stale localStorage.
+    const hashRoom = (() => { try { return decodeURIComponent(location.hash.slice(1)); } catch(_) { return ''; } })();
+    if (hashRoom) return;
+
     let savedRoom, savedRole;
     try { savedRoom = localStorage.getItem('p2p_room'); } catch (_) {}
     try { savedRole = localStorage.getItem('p2p_role'); } catch (_) {}
@@ -1744,10 +1751,22 @@ async function tryAutoRejoin() {
 }
 
 // Run on pageshow (Safari) or immediately if page already loaded.
+// Handle bfcache: if page is restored from back/forward cache, JavaScript state
+// (including `joined`, `ws`, etc.) is preserved but stale — reset to safe defaults.
 if (document.readyState === 'complete') {
   tryAutoRejoin();
 } else {
-  window.addEventListener('pageshow', () => tryAutoRejoin());
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) {
+      // bfcache restore — reset stale state
+      joined = false;
+      myId = undefined;
+      ws = null;
+      wsReconnectAttempts = 0;
+      if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    }
+    tryAutoRejoin();
+  });
 }
 
 // Notify server before page unload so stale host is cleaned up immediately.
@@ -1758,5 +1777,30 @@ window.addEventListener('beforeunload', () => {
     ws.send(JSON.stringify({ type: 'leave' }));
   }
 });
+
+// Debug helper — type __debug() in the console to inspect internal state.
+window.__debug = () => {
+  const state = {
+    joined,
+    myId,
+    myRole,
+    ws: ws ? (ws.readyState === WebSocket.OPEN ? 'OPEN' :
+              ws.readyState === WebSocket.CONNECTING ? 'CONNECTING' :
+              ws.readyState === WebSocket.CLOSING ? 'CLOSING' :
+              ws.readyState === WebSocket.CLOSED ? 'CLOSED' : ws.readyState) : null,
+    wsReconnectAttempts,
+    wsReconnectTimer: wsReconnectTimer ? 'active' : null,
+    micEnabled,
+    systemEnabled,
+    listenerMuted,
+    // localStorage
+    p2p_room: (() => { try { return localStorage.getItem('p2p_room'); } catch(_) { return null; } })(),
+    p2p_role: (() => { try { return localStorage.getItem('p2p_role'); } catch(_) { return null; } })(),
+    // URL hash
+    hash: location.hash,
+  };
+  console.table(state);
+  return state;
+};
 
 })();

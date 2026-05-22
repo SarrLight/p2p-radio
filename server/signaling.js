@@ -44,7 +44,7 @@ function scoreInterface(name) {
   }
 
   // prioritize real NICs
-  if (n.includes('wlan') || n.includes('wi-fi') || n.includes('wifi')) {
+  if (n.includes('wlan') || n.includes('wi-fi') || n.includes('wifi') || n.startsWith('wlx')) {
     return 30;
   }
   if (n.includes('ethernet') || n.includes('\u4ee5\u592a\u7f51')) {
