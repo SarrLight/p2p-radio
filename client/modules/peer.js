@@ -109,41 +109,12 @@ export function makePC(peerId) {
     }
 
     // ── Playback path selection ──────────────────────────────────────
-    const isIOSSafari = /Safari/i.test(navigator.userAgent) &&
-      !/CriOS|FxiOS|EdgiOS|OPiOS|Chrome/i.test(navigator.userAgent) &&
-      (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
-       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-
-    const useWebAudio = isIOSSafari;
-
-    if (useWebAudio) {
-      try {
-        if (S.remoteAudioSources[peerId]) {
-          S.remoteAudioSources[peerId].disconnect();
-        }
-        let ctx = (S.myRole === 'host') ? S.audioContext : null;
-        if (!ctx) {
-          if (!S.listenerAudioContext) {
-            S.listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-          }
-          ctx = S.listenerAudioContext;
-        }
-        if (ctx && ctx.state !== 'running') {
-          await ctx.resume().catch(() => {});
-        }
-        {
-          const source = ctx.createMediaStreamSource(stream);
-          ensureListenerGain();
-          source.connect(S.listenerGainNode || ctx.destination);
-          S.remoteAudioSources[peerId] = source;
-          console.log(`[${peerId}] playing via Web Audio (role=${S.myRole}, ctxState=${ctx ? ctx.state : 'null'})`);
-        }
-      } catch (err) {
-        console.warn(`[${peerId}] Web Audio playback failed`, err);
-      }
-      const oldAudio = document.getElementById('audio-' + peerId);
-      if (oldAudio) oldAudio.remove();
-    } else {
+    // Try <audio> element first on all platforms.  On iOS Safari,
+    // Web Audio MediaStreamSource → destination can be silently blocked
+    // when ontrack fires outside a user gesture, while <audio> with
+    // playsinline + srcObject works reliably on iOS 14.5+.
+    // Fall back to Web Audio if autoplay is blocked.
+    {
       let audio = document.getElementById('audio-' + peerId);
       if (audio) audio.remove();
       audio = document.createElement('audio');
