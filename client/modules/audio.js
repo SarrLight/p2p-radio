@@ -87,12 +87,26 @@ export function stopInputMeter() {
 
 // ── Playback meter ─────────────────────────────────────────────────────
 async function ensurePlaybackMeter() {
-  if (!S.playbackAudioContext) {
-    S.playbackAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-    S.playbackAnalyser = S.playbackAudioContext.createAnalyser();
+  let ctx = S.playbackAudioContext;
+
+  if (!ctx) {
+    // On iOS/iPad, listenerAudioContext was created inside the join gesture
+    // and is 'running'. Reuse it for the analyser instead of creating a new
+    // AudioContext, which iOS would keep permanently suspended.
+    ctx = S.listenerAudioContext;
+    if (ctx && ctx.state !== 'closed') {
+      S.playbackAudioContext = ctx;
+    } else {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      S.playbackAudioContext = ctx;
+      ctx.resume().catch(() => {});
+    }
+  }
+
+  if (!S.playbackAnalyser) {
+    S.playbackAnalyser = ctx.createAnalyser();
     S.playbackAnalyser.fftSize = 2048;
     S.playbackAnalyser.smoothingTimeConstant = 0.85;
-    S.playbackAudioContext.resume().catch(() => {});
   }
 
   if (!S.playbackMeterRaf) {

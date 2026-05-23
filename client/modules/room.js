@@ -37,16 +37,19 @@ export function leaveRoom() {
       S.micSourceNode = null; S.systemSourceNode = null;
     }
     if (S.listenerAudioContext) {
+      const wasPlaybackShared = (S.playbackAudioContext === S.listenerAudioContext);
       S.listenerAudioContext.close();
       S.listenerAudioContext = null;
       S.listenerGainNode = null;
+      // playbackAudioContext reuses listenerAudioContext on iOS — already closed above
+      if (wasPlaybackShared) S.playbackAudioContext = null;
     }
     if (S.playbackAudioContext) {
       S.playbackAudioContext.close();
-      S.playbackAudioContext = null;
-      S.playbackAnalyser = null;
-      if (S.playbackMeterRaf) { cancelAnimationFrame(S.playbackMeterRaf); S.playbackMeterRaf = 0; }
     }
+    S.playbackAudioContext = null;
+    S.playbackAnalyser = null;
+    if (S.playbackMeterRaf) { cancelAnimationFrame(S.playbackMeterRaf); S.playbackMeterRaf = 0; }
 
     if (S.localPreviewAudio) {
       try { S.localPreviewAudio.remove(); } catch (_) {}
