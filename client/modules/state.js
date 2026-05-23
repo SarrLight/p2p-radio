@@ -49,6 +49,7 @@ export const S = {
   listenerAudioContext: null,
   listenerGainNode: null,
   listenerMuted: false,
+  reactionCounts: { '😭': 0, '👍': 0, '❤️': 0, '🥰': 0, '🥳': 0 },
   wsReconnectTimer: null,
   wsReconnectAttempts: 0,
 };
