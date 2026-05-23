@@ -86,9 +86,7 @@ export function makePC(peerId) {
     } finally {
       pc._negotiationInProgress = false;
     }
-  };
-
-  pc.ontrack = async (e) => {
+  };\n\n  // ── Audio activation helpers ─────────────────────────────────────\n  function markAudioActivated() {\n    if (S._audioActivated) return;\n    S._audioActivated = true;\n    const btn = document.getElementById('mute-btn');\n    if (btn && btn.textContent === '🔇 点击播放') {\n      btn.textContent = '🔊 收听中';\n      btn.classList.remove('muted');\n    }\n  }\n  function scheduleRetry(audioEl) {\n    const tryPlay = () => {\n      audioEl.play().then(() => {\n        markAudioActivated();\n        console.log(`[${peerId}] <audio> retry OK`);\n      }).catch(() => {});\n    };\n    setTimeout(tryPlay, 500);\n    setTimeout(tryPlay, 2000);\n  }\n\n  pc.ontrack = async (e) => {
     const stream = e.streams[0];
     const audioTracks = stream.getAudioTracks();
     console.log(`[${peerId}] ontrack fired, stream has ${audioTracks.length} audio tracks`);
@@ -150,15 +148,12 @@ export function makePC(peerId) {
       if (played) {
         audioDebug.audioPlayResult = 'played';
         console.log(`[${peerId}] iOS <audio> play() OK`);
+        markAudioActivated();
       } else {
         audioDebug.audioPlayResult = 'blocked';
         console.log(`[${peerId}] iOS <audio> blocked, awaiting user gesture (mute btn etc.)`);
-        // No Web Audio — <audio> stays in DOM.  First .play() is blocked
-        // outside gesture, but the mute/unmute button click is a fresh
-        // user gesture that will retry .play() via the mute handler.
         if (!isSafari) {
-          setTimeout(() => audio.play().catch(() => {}), 500);
-          setTimeout(() => audio.play().catch(() => {}), 2000);
+          scheduleRetry(audio);
         }
       }
 
@@ -191,6 +186,7 @@ export function makePC(peerId) {
         }
       } else {
         audioDebug.audioPlayResult = 'played';
+        markAudioActivated();
         if (S.remoteAudioSources[peerId]) {
           try { S.remoteAudioSources[peerId].disconnect(); } catch(e) {}
           delete S.remoteAudioSources[peerId];
