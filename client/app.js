@@ -156,29 +156,31 @@ if (fwBtn) {
 const muteBtn = document.getElementById('mute-btn');
 if (muteBtn) {
   muteBtn.addEventListener('click', () => {
-    // First click after join: user gesture — kickstart <audio>.play()
-    if (!S._audioActivated) {
-      S._audioActivated = true;
-      document.querySelectorAll('#remotes audio').forEach(a => {
-        a.play().catch(() => {});
-        a.muted = false;
-      });
-      if (S.listenerGainNode) S.listenerGainNode.gain.value = 1;
-      S.listenerMuted = false;
-      muteBtn.textContent = '🔊 收听中';
-      muteBtn.classList.remove('muted');
-      console.log('[mute] audio activated by user gesture');
-      return;
-    }
-
     S.listenerMuted = !S.listenerMuted;
     if (S.listenerGainNode) S.listenerGainNode.gain.value = S.listenerMuted ? 0 : 1;
     document.querySelectorAll('#remotes audio').forEach(a => {
       a.muted = S.listenerMuted;
-      if (!S.listenerMuted) a.play().catch(() => {});
     });
     muteBtn.textContent = S.listenerMuted ? '🔇 已静音' : '🔊 收听中';
     muteBtn.classList.toggle('muted', S.listenerMuted);
+  });
+}
+
+// ── Start overlay (tap-to-play) ────────────────────────────────────────
+const overlay = document.getElementById('start-overlay');
+if (overlay) {
+  overlay.addEventListener('click', () => {
+    if (!S.joined || S._audioActivated) return;
+    // User gesture — start all pending <audio> elements
+    document.querySelectorAll('#remotes audio').forEach(a => {
+      a.play().catch(() => {});
+      a.muted = false;
+    });
+    if (S.listenerGainNode) S.listenerGainNode.gain.value = 1;
+    S._audioActivated = true;
+    overlay.classList.remove('show');
+    const btn = document.getElementById('mute-btn');
+    if (btn) { btn.textContent = '🔊 收听中'; btn.classList.remove('muted'); }
   });
 }
 
@@ -192,10 +194,14 @@ document.addEventListener('click', () => {
       S._audioActivated = true;
     }
   });
-  // Sync mute button UI if this click activated audio
-  if (S._audioActivated && muteBtn && muteBtn.textContent === '🔇 点击播放') {
-    muteBtn.textContent = '🔊 收听中';
-    muteBtn.classList.remove('muted');
+  // Sync overlay + mute button if this click activated audio
+  if (S._audioActivated) {
+    const ov = document.getElementById('start-overlay');
+    if (ov) ov.classList.remove('show');
+    if (muteBtn && muteBtn.textContent === '🔇 点击播放') {
+      muteBtn.textContent = '🔊 收听中';
+      muteBtn.classList.remove('muted');
+    }
   }
 }, { passive: true });
 

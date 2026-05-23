@@ -67,6 +67,9 @@ export function leaveRoom() {
     S.joined = false;
     S.myId = undefined;
     S._audioActivated = false;
+    // Hide start-overlay if visible
+    const ov = document.getElementById('start-overlay');
+    if (ov) ov.classList.remove('show');
 
     stopStatsPolling();
 

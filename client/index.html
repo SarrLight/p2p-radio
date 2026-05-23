@@ -128,6 +128,16 @@
     #mute-btn{font-size:13px;padding:5px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer;transition:all .15s}
     #mute-btn:hover{background:rgba(255,255,255,.1)}
     #mute-btn.muted{color:var(--danger);border-color:rgba(248,113,113,.3)}
+
+    /* ── Start overlay ── */
+    #start-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .3s;pointer-events:none}
+    #start-overlay.show{opacity:1;pointer-events:auto}
+    #start-overlay .bg{position:absolute;inset:0;background:rgba(0,0,0,.75)}
+    #start-overlay .content{position:relative;text-align:center;color:#fff}
+    #start-overlay .icon{font-size:64px;margin-bottom:16px;animation:pulse 1.5s ease-in-out infinite}
+    #start-overlay .text{font-size:24px;font-weight:600;margin-bottom:8px}
+    #start-overlay .hint{font-size:14px;opacity:.6}
+    @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.1);opacity:.8}}
     #reaction-bar{display:none;justify-content:center;gap:4px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06)}
     #reaction-bar button{font-size:22px;padding:4px 8px;border-radius:10px;border:none;background:transparent;cursor:pointer;transition:transform .12s,background .12s;line-height:1;touch-action:manipulation}
     #reaction-bar button:hover{transform:scale(1.25);background:rgba(255,255,255,.06)}
@@ -279,5 +289,13 @@ document.getElementById('diag-toggle').addEventListener('click', function(){
 });
 </script>
 <script type="module" src="./app.js"></script>
+<div id="start-overlay">
+  <div class="bg"></div>
+  <div class="content">
+    <div class="icon">🔊</div>
+    <div class="text">点击开始收听</div>
+    <div class="hint">点击任意位置启动音频</div>
+  </div>
+</div>
 </body>
 </html>

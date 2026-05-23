@@ -86,7 +86,32 @@ export function makePC(peerId) {
     } finally {
       pc._negotiationInProgress = false;
     }
-  };\n\n  // ── Audio activation helpers ─────────────────────────────────────\n  function markAudioActivated() {\n    if (S._audioActivated) return;\n    S._audioActivated = true;\n    const btn = document.getElementById('mute-btn');\n    if (btn && btn.textContent === '🔇 点击播放') {\n      btn.textContent = '🔊 收听中';\n      btn.classList.remove('muted');\n    }\n  }\n  function scheduleRetry(audioEl) {\n    const tryPlay = () => {\n      audioEl.play().then(() => {\n        markAudioActivated();\n        console.log(`[${peerId}] <audio> retry OK`);\n      }).catch(() => {});\n    };\n    setTimeout(tryPlay, 500);\n    setTimeout(tryPlay, 2000);\n  }\n\n  pc.ontrack = async (e) => {
+  };
+
+  // ── Audio activation helpers ─────────────────────────────────────
+  function markAudioActivated() {
+    if (S._audioActivated) return;
+    S._audioActivated = true;
+    const btn = document.getElementById('mute-btn');
+    if (btn && btn.textContent === '🔇 点击播放') {
+      btn.textContent = '🔊 收听中';
+      btn.classList.remove('muted');
+    }
+    const overlay = document.getElementById('start-overlay');
+    if (overlay) overlay.classList.remove('show');
+  }
+  function scheduleRetry(audioEl) {
+    const tryPlay = () => {
+      audioEl.play().then(() => {
+        markAudioActivated();
+        console.log(`[${peerId}] <audio> retry OK`);
+      }).catch(() => {});
+    };
+    setTimeout(tryPlay, 500);
+    setTimeout(tryPlay, 2000);
+  }
+
+  pc.ontrack = async (e) => {
     const stream = e.streams[0];
     const audioTracks = stream.getAudioTracks();
     console.log(`[${peerId}] ontrack fired, stream has ${audioTracks.length} audio tracks`);
