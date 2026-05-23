@@ -31,7 +31,20 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.static(path.join(__dirname, '..', 'client')));
+// Disable caching for JS/HTML — browsers (especially iOS Edge) aggressively
+// cache old code, causing confusing bugs after updates.
+app.use((req, res, next) => {
+  if (req.path.endsWith('.js') || req.path.endsWith('.html') || req.path.endsWith('.css')) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+app.use(express.static(path.join(__dirname, '..', 'client'), {
+  etag: false,
+  lastModified: false,
+}));
 
 // Caddy handles HTTPS; backend runs plain HTTP when behind reverse proxy
 let httpsEnabled = false;

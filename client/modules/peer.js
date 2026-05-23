@@ -111,7 +111,7 @@ export function makePC(peerId) {
     // interfere with autoplay.  No Web Audio fallback (iOS silently
     // blocks MediaStreamSource→destination outside gesture).
     // Level meter runs independently on listenerAudioContext.
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    const isIOS = /iPad|iPhone|iPod|EdgiOS|FxiOS|CriOS/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
     if (isIOS) {
