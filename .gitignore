@@ -19,5 +19,18 @@ server/ca-key.pem
 server/*.srl
 server/san.cnf
 *.bak
+*.pyc
+__pycache__/
 caddy.exe
 .ddns_aliyun.json
+
+# 个人系统脚本（非项目文件）
+scripts/__pycache__/
+scripts/zju_auth.py
+scripts/zju-auth-service.md
+scripts/setup_zju_auth_service.sh
+scripts/wait_for_network.sh
+scripts/boot-fix.sh
+scripts/boot-fix.service
+scripts/install_systemd.sh
+scripts/connect_zjuwlan.sh

@@ -817,6 +817,22 @@ function startStatsPolling(intervalMs = 5000) {
         const loss = inbound ? ((inbound.packetsLost||0) / Math.max(1, inbound.packetsReceived||0))*100 : 0;
         const rtt = pair && pair.currentRoundTripTime ? Math.round(pair.currentRoundTripTime*1000) : 0;
         
+        // Audio silence detection: check if we're receiving any audio bytes
+        // Note: on iOS Safari the inbound-rtp stats may not always report
+        // bytesReceived reliably, so only show the message after multiple
+        // consecutive polls with no data AND the connection is 'connected'.
+        const silentBytes = inbounds.reduce((s, ib) => s + (ib.bytesReceived || 0), 0);
+        // Track polling history per peer — reset when data arrives
+        if (!pc._silentPolls) pc._silentPolls = 0;
+        if (silentBytes === 0 && myRole === 'listener' && pc.connectionState === 'connected') {
+          pc._silentPolls++;
+          if (pc._silentPolls >= 4) { // ~20 seconds of silence → show warning
+            statusEl.textContent = `⏳ 正在等待音频流…（与 ${id} 已连接，${pc._silentPolls * 5}s 未收到数据）`;
+          }
+        } else if (silentBytes > 0) {
+          pc._silentPolls = 0; // reset — data is flowing
+        }
+        
         // Calculate bitrate for all inbound and outbound tracks separately
         const last = _lastStats[id] || { inTracks: {}, outTracks: {} };
         let totalInBitrate = 0;
@@ -1151,8 +1167,15 @@ function connectWs() {
         document.getElementById('listener-meters').style.display = 'block';
         if (!listenerAudioContext || listenerAudioContext.state === 'closed') {
           listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+          console.log(`[listener] created new AudioContext (state=${listenerAudioContext.state})`);
         }
-        listenerAudioContext.resume().catch(() => {});
+        console.log(`[listener] AudioContext state before resume: ${listenerAudioContext.state}`);
+        listenerAudioContext.resume().then(() => {
+          console.log(`[listener] AudioContext resumed successfully, state=${listenerAudioContext.state}`);
+        }).catch((err) => {
+          console.warn(`[listener] AudioContext resume failed:`, err);
+          statusEl.textContent = `⚠️ 音频初始化被浏览器阻止，请点击页面任意位置后再试`;
+        });
       }
       updateStatus();
 
@@ -1251,7 +1274,15 @@ function makePC(peerId) {
   }
   pc.onicecandidate = (e) => {
     if (e.candidate) {
+      const cand = e.candidate;
+      const candType = cand.type || 'unknown';
+      const proto = cand.protocol || '?';
+      const addr = cand.address || cand.ip || '?';
+      const port = cand.port || '?';
+      console.log(`[${peerId}] ICE candidate: ${candType} ${proto} ${addr}:${port} (sdpMid=${cand.sdpMid})`);
       ws.send(JSON.stringify({ type: 'ice', to: peerId, candidate: e.candidate }));
+    } else {
+      console.log(`[${peerId}] ICE candidate gathering complete`);
     }
   };
 
@@ -1260,7 +1291,31 @@ function makePC(peerId) {
     console.log(`[${peerId}] ICE state: ${pc.iceConnectionState}`);
     if (pc.iceConnectionState === 'failed') {
       console.log(`[${peerId}] ICE failed, attempting restart`);
+      statusEl.textContent = `⚠️ 与主播 ${peerId} 的 ICE 连接失败，正在重试…`;
       restartIce(pc, peerId);
+    }
+  };
+  pc.onconnectionstatechange = () => {
+    const st = pc.connectionState;
+    console.log(`[${peerId}] connection state: ${st}`);
+    if (st === 'connected') {
+      statusEl.textContent = `✅ 与主播 ${peerId} 连接成功，等待音频…`;
+      // Start a watchdog: if no audio data within 8s, show warning
+      setTimeout(() => {
+        pc.getStats().then(stats => {
+          let hasAudio = false;
+          stats.forEach(r => {
+            if (r.type === 'inbound-rtp' && r.kind === 'audio' && (r.bytesReceived || 0) > 0) hasAudio = true;
+          });
+          if (!hasAudio && joined) {
+            statusEl.textContent = `⚠️ 已连接但 8 秒未收到音频数据，检查主播是否已开启麦克风`;
+          }
+        }).catch(() => {});
+      }, 8000);
+    } else if (st === 'failed') {
+      statusEl.textContent = `❌ 与主播 ${peerId} 的连接已断开`;
+    } else if (st === 'disconnected') {
+      console.warn(`[${peerId}] connection disconnected`);
     }
   };
 
@@ -1289,7 +1344,16 @@ function makePC(peerId) {
   
   pc.ontrack = async (e) => {
     const stream = e.streams[0];
-    console.log(`[${peerId}] ontrack fired, stream has ${stream.getAudioTracks().length} audio tracks`);
+    const audioTracks = stream.getAudioTracks();
+    console.log(`[${peerId}] ontrack fired, stream has ${audioTracks.length} audio tracks`);
+    // Debug: log track state
+    audioTracks.forEach((t, i) => {
+      console.log(`[${peerId}] audio track[${i}]: id=${t.id}, kind=${t.kind}, enabled=${t.enabled}, muted=${t.muted}, readyState=${t.readyState}`);
+    });
+    if (audioTracks.length === 0) {
+      console.warn(`[${peerId}] ⚠️ ontrack fired but NO audio tracks in stream!`);
+      statusEl.textContent = `⚠️ 收到 ${peerId} 的连接但无音频轨道`;
+    }
     if (e.receiver && e.receiver.playoutDelayHint !== undefined) {
       try {
         e.receiver.playoutDelayHint = { min: 0.15, max: 0.5 };
@@ -1327,12 +1391,14 @@ function makePC(peerId) {
         if (ctx && ctx.state !== 'running') {
           await ctx.resume().catch(() => {});
         }
-        if (ctx && ctx.state === 'running') {
+        // Always connect, even if ctx.state is still 'suspended' (iOS).
+        // When the AudioContext eventually resumes (tap/gesture), audio flows.
+        {
           const source = ctx.createMediaStreamSource(stream);
           ensureListenerGain();
           source.connect(listenerGainNode || ctx.destination);
           remoteAudioSources[peerId] = source;
-          console.log(`[${peerId}] playing via Web Audio (role=${myRole})`);
+          console.log(`[${peerId}] playing via Web Audio (role=${myRole}, ctxState=${ctx ? ctx.state : 'null'})`);
         }
       } catch (err) {
         console.warn(`[${peerId}] Web Audio playback failed`, err);
@@ -1500,6 +1566,20 @@ joinBtn.onclick = async () => {
   // localStorage writes inside async WebSocket callbacks.
   try { localStorage.setItem('p2p_room', roomInput.value); } catch (_) {}
   try { localStorage.setItem('p2p_role', myRole); } catch (_) {}
+
+  // iOS Safari: AudioContext MUST be created/resumed inside the user gesture
+  // (click handler), NOT in async WebSocket callbacks, otherwise resume()
+  // is silently denied and audio never plays.
+  // Create regardless of role — server may downgrade host→listener due to
+  // host conflict, and the WebSocket callback won't have gesture context.
+  {
+    if (!listenerAudioContext || listenerAudioContext.state === 'closed') {
+      try { listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
+    }
+    if (listenerAudioContext && listenerAudioContext.state !== 'running') {
+      listenerAudioContext.resume().catch(() => {});
+    }
+  }
 
   connectWs();
   // Role-specific setup is deferred to the 'joined' handler,
@@ -1788,17 +1868,40 @@ window.__debug = () => {
               ws.readyState === WebSocket.CONNECTING ? 'CONNECTING' :
               ws.readyState === WebSocket.CLOSING ? 'CLOSING' :
               ws.readyState === WebSocket.CLOSED ? 'CLOSED' : ws.readyState) : null,
-    wsReconnectAttempts,
-    wsReconnectTimer: wsReconnectTimer ? 'active' : null,
-    micEnabled,
-    systemEnabled,
-    listenerMuted,
-    // localStorage
-    p2p_room: (() => { try { return localStorage.getItem('p2p_room'); } catch(_) { return null; } })(),
-    p2p_role: (() => { try { return localStorage.getItem('p2p_role'); } catch(_) { return null; } })(),
-    // URL hash
-    hash: location.hash,
+    listenerAudioContext: listenerAudioContext ? {
+      state: listenerAudioContext.state,
+      sampleRate: listenerAudioContext.sampleRate,
+      baseLatency: listenerAudioContext.baseLatency,
+    } : null,
+    listenerGainNode: listenerGainNode ? { gain: listenerGainNode.gain.value } : null,
+    audioContext: audioContext ? { state: audioContext.state } : null,
+    playbackAudioContext: playbackAudioContext ? { state: playbackAudioContext.state } : null,
+    peers: Object.keys(pcMap).reduce((acc, id) => {
+      const pc = pcMap[id];
+      acc[id] = {
+        connState: pc.connectionState,
+        iceState: pc.iceConnectionState,
+        signState: pc.signalingState,
+        localCandidates: [],
+        remoteCandidates: [],
+        senders: pc._senders ? Object.keys(pc._senders).filter(k => pc._senders[k]).length : 0,
+      };
+      if (pc.localDescription) acc[id].localSDP = pc.localDescription.sdp.slice(0, 200);
+      return acc;
+    }, {}),
+    remoteAudioSources: Object.keys(remoteAudioSources),
+    peerRoles,
   };
+  console.table(state.peers, ['connState','iceState','signState','senders']);
+  console.log('__debug full state:', JSON.stringify(state, null, 2));
+  // Include legacy fields for compatibility
+  state.wsReconnectAttempts = wsReconnectAttempts;
+  state.micEnabled = micEnabled;
+  state.systemEnabled = systemEnabled;
+  state.listenerMuted = listenerMuted;
+  state.p2p_room = (() => { try { return localStorage.getItem('p2p_room'); } catch(_) { return null; } })();
+  state.p2p_role = (() => { try { return localStorage.getItem('p2p_role'); } catch(_) { return null; } })();
+  state.hash = location.hash;
   console.table(state);
   return state;
 };
