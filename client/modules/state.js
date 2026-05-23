@@ -1,7 +1,8 @@
 // ── DOM refs ──
 export const dom = {
   roomInput: document.getElementById('room'),
-  joinBtn: document.getElementById('join'),
+  createBtn: document.getElementById('btn-create'),
+  joinBtn: document.getElementById('btn-join'),
   toggleMicBtn: document.getElementById('toggle-mic'),
   toggleSystemBtn: document.getElementById('toggle-system'),
   statusEl: document.getElementById('status'),

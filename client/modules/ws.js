@@ -48,13 +48,6 @@ export function connectWs() {
       if (data.yourRole) {
         if (S.myRole === 'host' && data.yourRole === 'listener') {
           dom.statusEl.textContent = '该电台已有主播，已自动切换为听众模式。';
-          const hostBtn = document.getElementById('role-host');
-          const listenerBtn = document.getElementById('role-listener');
-          if (hostBtn && listenerBtn) {
-            hostBtn.classList.remove('active');
-            hostBtn.classList.add('locked');
-            listenerBtn.classList.add('active');
-          }
         }
         S.myRole = data.yourRole;
       }
@@ -91,7 +84,9 @@ export function connectWs() {
 
       updateStatus();
 
+      dom.createBtn.classList.add('hidden');
       dom.joinBtn.classList.add('hidden');
+      dom.roomInput.disabled = true;
       const leaveBtn = document.getElementById('leave');
       if (leaveBtn) leaveBtn.classList.remove('hidden');
 

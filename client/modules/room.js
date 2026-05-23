@@ -77,14 +77,14 @@ export function leaveRoom() {
     if (container) container.innerHTML = '无连接';
     if (dom.statsRawEl) dom.statsRawEl.textContent = '等待数据...';
 
+    dom.createBtn.classList.remove('hidden');
     dom.joinBtn.classList.remove('hidden');
     const leaveBtn = document.getElementById('leave');
     if (leaveBtn) leaveBtn.classList.add('hidden');
+    dom.createBtn.disabled = false;
     dom.joinBtn.disabled = false;
+    dom.roomInput.disabled = false;
     document.getElementById('room-list').classList.remove('disabled');
-    document.querySelectorAll('#role-selector button, #room').forEach(el => el.disabled = false);
-    document.getElementById('role-host').classList.remove('locked');
-    document.getElementById('role-selector').style.opacity = '1';
     document.getElementById('host-controls').style.display = 'none';
     document.getElementById('host-meters').style.display = 'none';
     document.getElementById('listener-meters').style.display = 'block';

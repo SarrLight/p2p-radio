@@ -40,30 +40,10 @@ export async function fetchRooms() {
       item.addEventListener('click', () => {
         if (S.joined) return;
         dom.roomInput.value = name;
-        updateRoleSelectorForRoom(name);
       });
       listEl.appendChild(item);
     }
   } catch (_) {}
-  if (!S.joined) updateRoleSelectorForRoom(dom.roomInput.value.trim());
-}
-
-export function updateRoleSelectorForRoom(roomName) {
-  const info = roomData[roomName];
-  const hostBtn = document.getElementById('role-host');
-  const listenerBtn = document.getElementById('role-listener');
-  if (!hostBtn || !listenerBtn) return;
-
-  if (info && info.hasHost) {
-    hostBtn.disabled = true;
-    hostBtn.classList.add('locked');
-    listenerBtn.classList.add('active');
-    hostBtn.classList.remove('active');
-    S.myRole = 'listener';
-  } else if (!info || !info.hasHost) {
-    hostBtn.disabled = false;
-    hostBtn.classList.remove('locked');
-  }
 }
 
 export function startRoomPolling(intervalMs = 5000) {

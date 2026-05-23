@@ -1,6 +1,6 @@
 import { dom, S, servers, audioDebug } from './modules/state.js';
 import { launchFireworks, updateStatus, setPlaybackMeter, updateAccessUrl } from './modules/ui.js';
-import { fetchRooms, startRoomPolling, updateRoleSelectorForRoom } from './modules/room-ui.js';
+import { fetchRooms, startRoomPolling } from './modules/room-ui.js';
 import { enableMic, disableMic, enableSystemAudio, disableSystemAudio } from './modules/audio.js';
 import { connectWs } from './modules/ws.js';
 import { leaveRoom } from './modules/room.js';
@@ -34,32 +34,27 @@ if (dom.statsCopyBtn) {
   });
 }
 
-// ── Join button ────────────────────────────────────────────────────────
-dom.joinBtn.onclick = async () => {
+// ── Create / Join buttons ──────────────────────────────────────────────
+async function doJoin(role) {
   if (S.joined) { console.warn('Already joined, ignoring click'); return; }
   const roomName = dom.roomInput.value.trim();
   if (!roomName) { dom.statusEl.textContent = '请输入电台名称'; return; }
   dom.roomInput.value = roomName;
+  S.myRole = role;
+
+  dom.createBtn.disabled = true;
   dom.joinBtn.disabled = true;
-  document.querySelectorAll('#role-selector button, #room').forEach(el => el.disabled = true);
-  document.getElementById('role-selector').style.opacity = '0.5';
+  dom.roomInput.disabled = true;
 
   try { localStorage.setItem('p2p_room', dom.roomInput.value); } catch (_) {}
   try { localStorage.setItem('p2p_role', S.myRole); } catch (_) {}
 
   // iOS Safari: AudioContext MUST be created inside the user gesture
   {
-    // Always create a fresh AudioContext inside the user gesture.
-    // The one from tryAutoRejoin (pageshow) was created outside gesture
-    // and Edge iOS may not fully trust it even after .resume().
     try {
       S.listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)();
       S.listenerAudioContext.resume().catch(() => {});
     } catch (_) {}
-    // Prime the audio session: keep a silent oscillator running until
-    // ontrack actually plays audio.  Edge iOS deactivates the audio
-    // output path if nothing is connected to destination between the
-    // gesture and the async ontrack callback.
     if (S.listenerAudioContext && S.listenerAudioContext.state === 'running') {
       try {
         const ctx = S.listenerAudioContext;
@@ -69,18 +64,21 @@ dom.joinBtn.onclick = async () => {
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start();
-        // Store reference so ontrack can stop it when real audio starts
         S._primeOsc = osc;
         S._primeGain = gain;
         audioDebug.primeOscActive = true;
-        // Safety cleanup after 30s (ontrack should have fired by then)
-        setTimeout(() => { if (S._primeOsc) { try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {} S._primeOsc = null; S._primeGain = null; } }, 30000);
+        setTimeout(() => {
+          if (S._primeOsc) { try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {} S._primeOsc = null; S._primeGain = null; }
+        }, 30000);
       } catch (_) {}
     }
   }
 
   connectWs();
-};
+}
+
+dom.createBtn.onclick = () => doJoin('host');
+dom.joinBtn.onclick = () => doJoin('listener');
 
 // ── Leave button ───────────────────────────────────────────────────────
 const leaveBtn = document.getElementById('leave');
@@ -116,25 +114,7 @@ dom.toggleSystemBtn.onclick = async () => {
   }
 };
 
-// ── Role selector ──────────────────────────────────────────────────────
-document.getElementById('role-host').addEventListener('click', () => {
-  if (document.getElementById('role-host').disabled) return;
-  document.getElementById('role-host').classList.add('active');
-  document.getElementById('role-listener').classList.remove('active');
-  S.myRole = 'host';
-});
-document.getElementById('role-listener').addEventListener('click', () => {
-  document.getElementById('role-listener').classList.add('active');
-  document.getElementById('role-host').classList.remove('active');
-  S.myRole = 'listener';
-});
-
-// ── Room input ─────────────────────────────────────────────────────────
-dom.roomInput.addEventListener('input', () => {
-  updateRoleSelectorForRoom(dom.roomInput.value.trim());
-});
-
-// ── Reaction bar ───────────────────────────────────────────────────────
+// ── Copy shareable link ────────────────────────────────────────────────
 document.querySelectorAll('#reaction-bar button[data-emoji]').forEach(btn => {
   btn.addEventListener('click', () => {
     if (!S.ws || S.ws.readyState !== WebSocket.OPEN) return;
@@ -226,7 +206,6 @@ updateAccessUrl();
 const hashRoom = (() => { try { return decodeURIComponent(location.hash.slice(1)); } catch(_) { return ''; } })();
 if (hashRoom && !S.joined) {
   dom.roomInput.value = hashRoom;
-  updateRoleSelectorForRoom(hashRoom);
 }
 
 updateStatus();
@@ -248,19 +227,14 @@ async function tryAutoRejoin() {
     dom.roomInput.value = savedRoom;
     S.myRole = savedRole;
 
-    // Check if room already has a host (roomData populated by fetchRooms)
-    // This may change S.myRole to 'listener'
-    updateRoleSelectorForRoom(savedRoom);
-
-    if (S.myRole === 'host') {
-      document.getElementById('role-host').classList.add('active');
-      document.getElementById('role-listener').classList.remove('active');
-    } else {
-      document.getElementById('role-listener').classList.add('active');
-      document.getElementById('role-host').classList.remove('active');
-    }
-
-    dom.statusEl.textContent = '页面已刷新，表单已恢复。点击"加入"继续。';
+    dom.statusEl.textContent = '检测到上次会话，正在重连…';
+    // Auto-rejoin with the saved role
+    setTimeout(() => {
+      if (!S.joined && !dom.createBtn.disabled) {
+        if (S.myRole === 'host') dom.createBtn.click();
+        else dom.joinBtn.click();
+      }
+    }, 500);
   } catch (e) {
     console.error('tryAutoRejoin:', e);
   }
