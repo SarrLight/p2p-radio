@@ -240,14 +240,20 @@ async function tryAutoRejoin() {
 
 if (document.readyState === 'complete') {
   tryAutoRejoin();
-} else {
   window.addEventListener('pageshow', (e) => {
     if (e.persisted) {
+      // bfcache restore — reset stale state
       S.joined = false;
       S.myId = undefined;
       S.ws = null;
       S.wsReconnectAttempts = 0;
       if (S.wsReconnectTimer) { clearTimeout(S.wsReconnectTimer); S.wsReconnectTimer = null; }
+      // bfcache preserves JS objects — close stale AudioContext
+      if (S.listenerAudioContext) {
+        try { S.listenerAudioContext.close(); } catch(_) {}
+        S.listenerAudioContext = null;
+        S.listenerGainNode = null;
+      }
     }
     tryAutoRejoin();
   });
