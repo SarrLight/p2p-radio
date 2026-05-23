@@ -93,13 +93,9 @@ export function makePC(peerId) {
     const audioTracks = stream.getAudioTracks();
     console.log(`[${peerId}] ontrack fired, stream has ${audioTracks.length} audio tracks`);
 
-    // Stop the priming oscillator (Edge iOS audio session unlocker)
-    if (S._primeOsc) {
-      try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {}
-      S._primeOsc = null;
-      S._primeGain = null;
-      audioDebug.primeOscActive = false;
-    }
+    // Don't stop prime oscillator yet — keep the audio session alive
+    // while we set up playback.  It will be stopped after the playback
+    // path is established (below).
 
     audioTracks.forEach((t, i) => {
       console.log(`[${peerId}] audio track[${i}]: id=${t.id}, kind=${t.kind}, enabled=${t.enabled}, muted=${t.muted}, readyState=${t.readyState}`);
@@ -114,7 +110,7 @@ export function makePC(peerId) {
     const _isSafariNS = /Safari/.test(navigator.userAgent) && !/EdgiOS|FxiOS|CriOS/.test(navigator.userAgent);
     audioDebug.isIOS = _isIOS;
     audioDebug.isSafari = _isSafariNS;
-    console.group(`[${peerId}] audio debug — isIOS=${_isIOS} isSafari=${_isSafariNS} ctxState=${audioDebug.audioCtxState}`);
+    console.group(`[${peerId}] audio debug — isIOS=${_isIOS} isSafari=${_isSafariNS} ctxState=${audioDebug.audioCtxState} primeActive=${!!S._primeOsc}`);
 
     if (audioTracks.length === 0) {
       console.warn(`[${peerId}] ⚠️ ontrack fired but NO audio tracks in stream!`);
@@ -127,10 +123,9 @@ export function makePC(peerId) {
     }
 
     // ── Playback path selection ──────────────────────────────────────
-    // Safari on iOS: <audio playsinline autoplay> + fire-and-forget .play().
-    // Edge/Chrome on iOS: <audio> + delayed .play() retry (their gesture
-    // expiry is stricter — retry gives the browser time to register
-    // the page interaction for autoplay).
+    // iOS all browsers: try <audio> first.  If blocked, fall back to Web
+    // Audio while the priming oscillator is still running (keeps the audio
+    // session active and may bypass iOS's outside-gesture restriction).
     // Non-iOS: <audio> + await .play(), fall back to Web Audio if blocked.
     const isIOS = /iPad|iPhone|iPod|EdgiOS|FxiOS|CriOS/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -151,15 +146,32 @@ export function makePC(peerId) {
 
     if (isIOS) {
       audioDebug.path = 'ios-audio';
-      audioDebug.audioPlayResult = 'fire-and-forget';
-      // iOS all browsers: <audio> path, no Web Audio fallback (silently blocked)
-      audio.play().catch(() => {});
-      // Edge/Chrome iOS may need a retry — gesture expiry is stricter
-      if (!isSafari) {
+      // Try .play() and check result (prime still active → Web Audio fallback available)
+      const played = await audio.play().then(() => true).catch(() => false);
+      if (played) {
+        audioDebug.audioPlayResult = 'played';
+        console.log(`[${peerId}] iOS <audio> play() OK`);
+      } else {
+        audioDebug.audioPlayResult = 'blocked';
+        console.log(`[${peerId}] iOS <audio> play() blocked, trying Web Audio with active prime`);
+        audio.remove();
+        try {
+          if (S.remoteAudioSources[peerId]) S.remoteAudioSources[peerId].disconnect();
+          if (S.listenerAudioContext) {
+            const source = S.listenerAudioContext.createMediaStreamSource(stream);
+            ensureListenerGain();
+            source.connect(S.listenerGainNode || S.listenerAudioContext.destination);
+            S.remoteAudioSources[peerId] = source;
+            audioDebug.path = 'web-audio-fallback';
+            console.log(`[${peerId}] Web Audio fallback (prime active = ${!!S._primeOsc})`);
+          }
+        } catch (err) {
+          console.warn(`[${peerId}] Web Audio fallback failed`, err);
+        }
+        // Still retry <audio> after delay as a secondary effort
         setTimeout(() => audio.play().catch(() => {}), 500);
         setTimeout(() => audio.play().catch(() => {}), 2000);
       }
-      console.log(`[${peerId}] iOS <audio> playback`);
 
     } else {
       audioDebug.path = 'non-ios-audio';
@@ -195,6 +207,14 @@ export function makePC(peerId) {
           delete S.remoteAudioSources[peerId];
         }
       }
+    }
+
+    // Stop the priming oscillator now that playback is set up
+    if (S._primeOsc) {
+      try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {}
+      S._primeOsc = null;
+      S._primeGain = null;
+      audioDebug.primeOscActive = false;
     }
 
     console.groupEnd();
