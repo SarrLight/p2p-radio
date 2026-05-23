@@ -211,12 +211,6 @@ async function tryAutoRejoin() {
     } else {
       document.getElementById('role-listener').classList.add('active');
       document.getElementById('role-host').classList.remove('active');
-      if (!S.listenerAudioContext || S.listenerAudioContext.state === 'closed') {
-        try { S.listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
-      }
-      if (S.listenerAudioContext) {
-        S.listenerAudioContext.resume().catch(() => {});
-      }
     }
 
     dom.statusEl.textContent = '页面已刷新，表单已恢复。点击"加入"继续。';
