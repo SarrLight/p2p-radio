@@ -50,6 +50,7 @@ export const S = {
   listenerGainNode: null,
   listenerMuted: false,
   reactionCounts: { '😭': 0, '👍': 0, '❤️': 0, '🥰': 0, '🥳': 0 },
+  _audioActivated: false,   // set true after first user gesture play()
   wsReconnectTimer: null,
   wsReconnectAttempts: 0,
 };

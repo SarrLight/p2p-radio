@@ -66,6 +66,7 @@ export function leaveRoom() {
 
     S.joined = false;
     S.myId = undefined;
+    S._audioActivated = false;
 
     stopStatsPolling();
 

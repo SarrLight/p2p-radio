@@ -99,7 +99,11 @@ export function connectWs() {
       const fwBtn = document.getElementById('firework-btn');
       if (fwBtn) fwBtn.classList.toggle('hidden', S.myRole !== 'host');
       const muteBtn = document.getElementById('mute-btn');
-      if (muteBtn) muteBtn.classList.remove('hidden');
+      if (muteBtn) {
+        muteBtn.classList.remove('hidden');
+        muteBtn.textContent = '🔇 点击播放';
+        muteBtn.classList.remove('muted');
+      }
 
       fetchRooms();
       startStatsPolling();

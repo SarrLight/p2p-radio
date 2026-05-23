@@ -156,6 +156,21 @@ if (fwBtn) {
 const muteBtn = document.getElementById('mute-btn');
 if (muteBtn) {
   muteBtn.addEventListener('click', () => {
+    // First click after join: user gesture — kickstart <audio>.play()
+    if (!S._audioActivated) {
+      S._audioActivated = true;
+      document.querySelectorAll('#remotes audio').forEach(a => {
+        a.play().catch(() => {});
+        a.muted = false;
+      });
+      if (S.listenerGainNode) S.listenerGainNode.gain.value = 1;
+      S.listenerMuted = false;
+      muteBtn.textContent = '🔊 收听中';
+      muteBtn.classList.remove('muted');
+      console.log('[mute] audio activated by user gesture');
+      return;
+    }
+
     S.listenerMuted = !S.listenerMuted;
     if (S.listenerGainNode) S.listenerGainNode.gain.value = S.listenerMuted ? 0 : 1;
     document.querySelectorAll('#remotes audio').forEach(a => {
@@ -167,14 +182,21 @@ if (muteBtn) {
   });
 }
 
-// On iOS (Edge), any user click after joining should retry <audio>.play()
-// since the ontrack callback is outside the initial gesture context.
-// This fires on mute click, reaction click, or any tap on the page.
+// Any click after joining should try to start <audio>.play() since
+// ontrack runs outside the initial gesture context (Edge iOS).
 document.addEventListener('click', () => {
   if (!S.joined) return;
   document.querySelectorAll('#remotes audio').forEach(a => {
-    if (a.paused) a.play().catch(() => {});
+    if (a.paused) {
+      a.play().catch(() => {});
+      S._audioActivated = true;
+    }
   });
+  // Sync mute button UI if this click activated audio
+  if (S._audioActivated && muteBtn && muteBtn.textContent === '🔇 点击播放') {
+    muteBtn.textContent = '🔊 收听中';
+    muteBtn.classList.remove('muted');
+  }
 }, { passive: true });
 
 // ── Copy shareable link ────────────────────────────────────────────────
