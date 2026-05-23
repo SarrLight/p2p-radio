@@ -106,12 +106,30 @@ export function makePC(peerId) {
     }
 
     // ── Playback path selection ──────────────────────────────────────
-    // Try <audio> element first on all platforms.  On iOS Safari,
-    // Web Audio MediaStreamSource → destination can be silently blocked
-    // when ontrack fires outside a user gesture, while <audio> with
-    // playsinline + srcObject works reliably on iOS 14.5+.
-    // Fall back to Web Audio if autoplay is blocked.
-    {
+    // iOS: <audio playsinline autoplay> works after page interaction.
+    // Do NOT call .play() — outside user gesture it rejects and may
+    // interfere with autoplay.  No Web Audio fallback (iOS silently
+    // blocks MediaStreamSource→destination outside gesture).
+    // Level meter runs independently on listenerAudioContext.
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    if (isIOS) {
+      let audio = document.getElementById('audio-' + peerId);
+      if (audio) audio.remove();
+      audio = document.createElement('audio');
+      audio.id = 'audio-' + peerId;
+      audio.autoplay = true;
+      audio.muted = false;
+      audio.volume = 1.0;
+      audio.playsInline = true;
+      audio.setAttribute('playsinline', '');
+      dom.remotes.appendChild(audio);
+      audio.srcObject = stream;
+      // Fire-and-forget play() as a hint; don't await — rejection is harmless
+      audio.play().catch(() => {});
+      console.log(`[${peerId}] iOS: <audio> playback (autoplay+playsinline)`);
+    } else {
       let audio = document.getElementById('audio-' + peerId);
       if (audio) audio.remove();
       audio = document.createElement('audio');
@@ -139,17 +157,8 @@ export function makePC(peerId) {
           {
             const source = S.listenerAudioContext.createMediaStreamSource(stream);
             ensureListenerGain();
-            // Inject level meter analyser into the chain (single
-            // MediaStreamSource — iOS chokes on two from the same stream).
-            if (!S.playbackAnalyser) {
-              S.playbackAnalyser = S.listenerAudioContext.createAnalyser();
-              S.playbackAnalyser.fftSize = 2048;
-              S.playbackAnalyser.smoothingTimeConstant = 0.85;
-            }
-            source.connect(S.playbackAnalyser);
             source.connect(S.listenerGainNode || S.listenerAudioContext.destination);
             S.remoteAudioSources[peerId] = source;
-            S._playbackAnalyserInjected = true;
             console.log(`[${peerId}] playing via Web Audio fallback`);
           }
         } catch (err) {
@@ -242,7 +251,6 @@ export function resetPeerConnections() {
     try { source.disconnect(); } catch(e) {}
   }
   S.playbackStreamSources.clear();
-  S._playbackAnalyserInjected = false;
   setPlaybackMeter(0, -120, false);
   S.peerRoles = {};
 }
