@@ -160,14 +160,22 @@ if (muteBtn) {
     if (S.listenerGainNode) S.listenerGainNode.gain.value = S.listenerMuted ? 0 : 1;
     document.querySelectorAll('#remotes audio').forEach(a => {
       a.muted = S.listenerMuted;
-      // Unmuting is a fresh user gesture — retry .play() to kickstart
-      // audio on Edge iOS where the initial ontrack .play() was blocked.
       if (!S.listenerMuted) a.play().catch(() => {});
     });
     muteBtn.textContent = S.listenerMuted ? '🔇 已静音' : '🔊 收听中';
     muteBtn.classList.toggle('muted', S.listenerMuted);
   });
 }
+
+// On iOS (Edge), any user click after joining should retry <audio>.play()
+// since the ontrack callback is outside the initial gesture context.
+// This fires on mute click, reaction click, or any tap on the page.
+document.addEventListener('click', () => {
+  if (!S.joined) return;
+  document.querySelectorAll('#remotes audio').forEach(a => {
+    if (a.paused) a.play().catch(() => {});
+  });
+}, { passive: true });
 
 // ── Copy shareable link ────────────────────────────────────────────────
 document.getElementById('copy-link').addEventListener('click', async () => {
