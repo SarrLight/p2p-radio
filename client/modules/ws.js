@@ -104,10 +104,6 @@ export function connectWs() {
         muteBtn.textContent = '🔊 收听中';
         muteBtn.classList.remove('muted');
       }
-      // Show the start-overlay on Edge iOS where <audio>.play() needs
-      // a user gesture after ontrack (closed in markAudioActivated).
-      const overlay = document.getElementById('start-overlay');
-      if (overlay) overlay.classList.add('show');
 
       fetchRooms();
       startStatsPolling();

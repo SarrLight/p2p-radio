@@ -176,7 +176,10 @@ export function makePC(peerId) {
         markAudioActivated();
       } else {
         audioDebug.audioPlayResult = 'blocked';
-        console.log(`[${peerId}] iOS <audio> blocked, awaiting user gesture (mute btn etc.)`);
+        console.log(`[${peerId}] iOS <audio> blocked, showing overlay`);
+        // Only show overlay on iOS where user gesture is needed
+        const ov = document.getElementById('start-overlay');
+        if (ov) ov.classList.add('show');
         if (!isSafari) {
           scheduleRetry(audio);
         }
