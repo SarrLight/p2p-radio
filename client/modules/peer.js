@@ -139,8 +139,17 @@ export function makePC(peerId) {
           {
             const source = S.listenerAudioContext.createMediaStreamSource(stream);
             ensureListenerGain();
+            // Inject level meter analyser into the chain (single
+            // MediaStreamSource — iOS chokes on two from the same stream).
+            if (!S.playbackAnalyser) {
+              S.playbackAnalyser = S.listenerAudioContext.createAnalyser();
+              S.playbackAnalyser.fftSize = 2048;
+              S.playbackAnalyser.smoothingTimeConstant = 0.85;
+            }
+            source.connect(S.playbackAnalyser);
             source.connect(S.listenerGainNode || S.listenerAudioContext.destination);
             S.remoteAudioSources[peerId] = source;
+            S._playbackAnalyserInjected = true;
             console.log(`[${peerId}] playing via Web Audio fallback`);
           }
         } catch (err) {
@@ -233,6 +242,7 @@ export function resetPeerConnections() {
     try { source.disconnect(); } catch(e) {}
   }
   S.playbackStreamSources.clear();
+  S._playbackAnalyserInjected = false;
   setPlaybackMeter(0, -120, false);
   S.peerRoles = {};
 }

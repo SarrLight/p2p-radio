@@ -137,6 +137,17 @@ async function ensurePlaybackMeter() {
 export async function registerPlaybackStream(peerId, stream) {
   await ensurePlaybackMeter();
 
+  // On iOS, the Web Audio fallback in ontrack already injected the
+  // analyser into the playback chain.  Don't create a second
+  // MediaStreamSource from the same stream — iOS chokes on that.
+  if (S._playbackAnalyserInjected) {
+    // RAF loop is started by ensurePlaybackMeter above — just track the peer
+    if (!S.playbackStreamSources.has(peerId)) {
+      S.playbackStreamSources.set(peerId, null); // marker for cleanup
+    }
+    return;
+  }
+
   const existingSource = S.playbackStreamSources.get(peerId);
   if (existingSource) {
     try { existingSource.disconnect(); } catch (e) {}
@@ -154,8 +165,8 @@ export function unregisterPlaybackStream(peerId) {
   const sourceNode = S.playbackStreamSources.get(peerId);
   if (sourceNode) {
     try { sourceNode.disconnect(); } catch (e) {}
-    S.playbackStreamSources.delete(peerId);
   }
+  S.playbackStreamSources.delete(peerId);
   if (S.playbackStreamSources.size === 0) {
     setPlaybackMeter(0, -120, false);
   }
