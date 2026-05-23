@@ -1,4 +1,4 @@
-import { dom, S, servers } from './modules/state.js';
+import { dom, S, servers, audioDebug } from './modules/state.js';
 import { launchFireworks, updateStatus, setPlaybackMeter, updateAccessUrl } from './modules/ui.js';
 import { fetchRooms, startRoomPolling, updateRoleSelectorForRoom } from './modules/room-ui.js';
 import { enableMic, disableMic, enableSystemAudio, disableSystemAudio } from './modules/audio.js';
@@ -72,6 +72,7 @@ dom.joinBtn.onclick = async () => {
         // Store reference so ontrack can stop it when real audio starts
         S._primeOsc = osc;
         S._primeGain = gain;
+        audioDebug.primeOscActive = true;
         // Safety cleanup after 30s (ontrack should have fired by then)
         setTimeout(() => { if (S._primeOsc) { try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {} S._primeOsc = null; S._primeGain = null; } }, 30000);
       } catch (_) {}

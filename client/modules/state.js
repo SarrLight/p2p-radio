@@ -57,6 +57,22 @@ export const S = {
 // Expose for debugging
 window.__pcMap = S.pcMap;
 
+// Audio diagnostics — updated at key decision points
+export const audioDebug = {
+  ua: navigator.userAgent,
+  platform: navigator.platform,
+  maxTouchPoints: navigator.maxTouchPoints,
+  isIOS: null,       // set at playback decision time
+  isSafari: null,    // set at playback decision time
+  path: null,        // 'ios-audio' | 'non-ios-audio' | 'web-audio-fallback'
+  audioCtxState: null,
+  audioPlayResult: null, // 'fire-and-forget' | 'played' | 'blocked'
+  primeOscActive: false,
+  ontrackFired: false,
+  peerCount: 0,
+};
+window.__audioDebug = audioDebug;
+
 // ICE servers: local STUN takes the LAN IP from /api/access-url so it works
 // even when the page is accessed via Cloudflare / reverse proxy.
 export const servers = {

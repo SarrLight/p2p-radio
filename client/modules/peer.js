@@ -1,4 +1,4 @@
-import { dom, S, servers } from './state.js';
+import { dom, S, servers, audioDebug } from './state.js';
 import { mungeOpusSdp } from './sdp.js';
 import { attachCurrentSources, addSystemAudioSender, registerPlaybackStream, unregisterPlaybackStream } from './audio.js';
 import { setPlaybackMeter, ensureListenerGain } from './ui.js';
@@ -98,11 +98,24 @@ export function makePC(peerId) {
       try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {}
       S._primeOsc = null;
       S._primeGain = null;
+      audioDebug.primeOscActive = false;
     }
 
     audioTracks.forEach((t, i) => {
       console.log(`[${peerId}] audio track[${i}]: id=${t.id}, kind=${t.kind}, enabled=${t.enabled}, muted=${t.muted}, readyState=${t.readyState}`);
     });
+
+    // ── Audio diagnostics ────────────────────────────────────────────
+    audioDebug.ontrackFired = true;
+    audioDebug.peerCount = Object.keys(S.pcMap).length + 1;
+    audioDebug.audioCtxState = S.listenerAudioContext?.state || 'none';
+    const _isIOS = /iPad|iPhone|iPod|EdgiOS|FxiOS|CriOS/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const _isSafariNS = /Safari/.test(navigator.userAgent) && !/EdgiOS|FxiOS|CriOS/.test(navigator.userAgent);
+    audioDebug.isIOS = _isIOS;
+    audioDebug.isSafari = _isSafariNS;
+    console.group(`[${peerId}] audio debug — isIOS=${_isIOS} isSafari=${_isSafariNS} ctxState=${audioDebug.audioCtxState}`);
+
     if (audioTracks.length === 0) {
       console.warn(`[${peerId}] ⚠️ ontrack fired but NO audio tracks in stream!`);
     }
@@ -137,6 +150,8 @@ export function makePC(peerId) {
     audio.srcObject = stream;
 
     if (isIOS) {
+      audioDebug.path = 'ios-audio';
+      audioDebug.audioPlayResult = 'fire-and-forget';
       // iOS all browsers: <audio> path, no Web Audio fallback (silently blocked)
       audio.play().catch(() => {});
       // Edge/Chrome iOS may need a retry — gesture expiry is stricter
@@ -147,9 +162,12 @@ export function makePC(peerId) {
       console.log(`[${peerId}] iOS <audio> playback`);
 
     } else {
+      audioDebug.path = 'non-ios-audio';
       // Non-iOS: try <audio>, fall back to Web Audio if blocked
       const played = await audio.play().then(() => true).catch(() => false);
       if (!played) {
+        audioDebug.audioPlayResult = 'blocked';
+        audioDebug.path = 'web-audio-fallback';
         console.log(`[${peerId}] audio.play() blocked, switching to Web Audio`);
         audio.remove();
         try {
@@ -171,12 +189,15 @@ export function makePC(peerId) {
           console.warn(`[${peerId}] Web Audio fallback failed`, err);
         }
       } else {
+        audioDebug.audioPlayResult = 'played';
         if (S.remoteAudioSources[peerId]) {
           try { S.remoteAudioSources[peerId].disconnect(); } catch(e) {}
           delete S.remoteAudioSources[peerId];
         }
       }
     }
+
+    console.groupEnd();
 
     registerPlaybackStream(peerId, stream).catch((error) => {
       console.error('Failed to register playback stream', error);

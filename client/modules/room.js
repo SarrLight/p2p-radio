@@ -61,6 +61,7 @@ export function leaveRoom() {
       try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {}
       S._primeOsc = null;
       S._primeGain = null;
+      audioDebug.primeOscActive = false;
     }
 
     S.joined = false;

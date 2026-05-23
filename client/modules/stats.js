@@ -1,4 +1,4 @@
-import { dom, S } from './state.js';
+import { dom, S, audioDebug } from './state.js';
 import { setPlaybackMeter } from './ui.js';
 
 // store last bytes/timestamp per peer to compute bitrate delta for in/out
@@ -17,6 +17,17 @@ export function startStatsPolling(intervalMs = 5000) {
     meEl.style.cssText = 'padding:4px 8px;margin-bottom:8px;font-size:12px;color:var(--text-muted)';
     meEl.textContent = `我的 ID: ${S.myId || '—'}  ${myRoleLabel}`;
     container.appendChild(meEl);
+
+    // ── Audio debug info ────────────────────────────────────────────────
+    const dbg = document.createElement('div');
+    dbg.style.cssText = 'padding:4px 8px;margin-bottom:8px;font-size:11px;color:var(--text-muted);border:1px solid rgba(255,255,255,.08);border-radius:6px';
+    dbg.innerHTML = `<b>Audio Debug</b><br/>
+ua: ${audioDebug.ua.slice(0,80)}…<br/>
+detect: isIOS=${audioDebug.isIOS} isSafari=${audioDebug.isSafari}<br/>
+ctx: ${audioDebug.audioCtxState} | path: ${audioDebug.path || '—'}<br/>
+play(): ${audioDebug.audioPlayResult || '—'} | prime: ${audioDebug.primeOscActive}<br/>
+ontrack: ${audioDebug.ontrackFired} | peers: ${audioDebug.peerCount}`;
+    container.appendChild(dbg);
 
     const keys = Object.keys(S.pcMap);
     if (keys.length === 0) {
