@@ -204,7 +204,7 @@ export function setPlaybackMeter(levelPercent, dbfs, isActive) {
     }
   }
   if (dom.playbackMeterStateEl) {
-    dom.playbackMeterStateEl.textContent = isActive ? '正在播放' : '等待音频流…';
+    dom.playbackMeterStateEl.textContent = isActive ? '正在播放' : '';
     dom.playbackMeterStateEl.className = 'meter-state' + (isActive ? ' live' : '');
   }
 }

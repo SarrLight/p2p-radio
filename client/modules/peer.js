@@ -1,7 +1,7 @@
 import { dom, S, servers } from './state.js';
 import { mungeOpusSdp } from './sdp.js';
 import { attachCurrentSources, addSystemAudioSender, registerPlaybackStream, unregisterPlaybackStream } from './audio.js';
-import { setPlaybackMeter, ensureListenerGain, updateStatus } from './ui.js';
+import { setPlaybackMeter, ensureListenerGain } from './ui.js';
 
 export function makePC(peerId) {
   const pc = new RTCPeerConnection(servers);
@@ -45,16 +45,17 @@ export function makePC(peerId) {
     const st = pc.connectionState;
     console.log(`[${peerId}] connection state: ${st}`);
     if (st === 'connected') {
-      dom.statusEl.textContent = `✅ 与主播 ${peerId} 连接成功，等待音频…`;
-      // 8s watchdog: if still no audio, show a hint (stats.js clears it when data arrives)
+      // 8s watchdog: if still no audio, log a hint (no statusEl update —
+      // diagnostics panel reflects it). Audio usually arrives shortly after.
       setTimeout(() => {
+        if (!S.joined) return;
         pc.getStats().then(stats => {
           let hasAudio = false;
           stats.forEach(r => {
             if (r.type === 'inbound-rtp' && r.kind === 'audio' && (r.bytesReceived || 0) > 0) hasAudio = true;
           });
-          if (!hasAudio && S.joined) {
-            dom.statusEl.textContent = `⏳ 与 ${peerId} 已连接，等待音频数据…（请确保主播已开启麦克风或系统声音）`;
+          if (!hasAudio) {
+            console.info(`[${peerId}] connected 8s, no audio yet (normal if host hasn't enabled mic/system audio)`);
           }
         }).catch(() => {});
       }, 8000);
@@ -96,10 +97,6 @@ export function makePC(peerId) {
     });
     if (audioTracks.length === 0) {
       console.warn(`[${peerId}] ⚠️ ontrack fired but NO audio tracks in stream!`);
-      dom.statusEl.textContent = `⚠️ 收到 ${peerId} 的连接但无音频轨道`;
-    } else if (dom.statusEl.textContent.includes('等待音频') || dom.statusEl.textContent.includes('未收到音频')) {
-      dom.statusEl.textContent = `🔊 正在接收 ${peerId} 的音频`;
-      setTimeout(() => { if (S.joined) updateStatus(); }, 3000);
     }
     if (e.receiver && e.receiver.playoutDelayHint !== undefined) {
       try {

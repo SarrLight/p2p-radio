@@ -1,5 +1,5 @@
 import { dom, S } from './state.js';
-import { setPlaybackMeter, updateStatus } from './ui.js';
+import { setPlaybackMeter } from './ui.js';
 
 // store last bytes/timestamp per peer to compute bitrate delta for in/out
 const _lastStats = {};
@@ -50,23 +50,14 @@ export function startStatsPolling(intervalMs = 5000) {
         const loss = inbound ? ((inbound.packetsLost||0) / Math.max(1, inbound.packetsReceived||0))*100 : 0;
         const rtt = pair && pair.currentRoundTripTime ? Math.round(pair.currentRoundTripTime*1000) : 0;
 
-        // Audio silence detection
+        // Audio silence detection — recorded in _silentPolls but no
+        // statusEl update (diagnostics panel shows the connection info)
         const silentBytes = inbounds.reduce((s, ib) => s + (ib.bytesReceived || 0), 0);
         if (!pc._silentPolls) pc._silentPolls = 0;
         if (silentBytes === 0 && S.myRole === 'listener' && pc.connectionState === 'connected') {
           pc._silentPolls++;
-          if (pc._silentPolls >= 4) {
-            dom.statusEl.textContent = `⏳ 正在等待音频流…（与 ${id} 已连接，${pc._silentPolls * 5}s 未收到数据）`;
-          }
         } else if (silentBytes > 0) {
           pc._silentPolls = 0;
-          // Audio arrived — clear any stale "waiting" message from the 8s watchdog
-          if (dom.statusEl.textContent.includes('等待音频') || dom.statusEl.textContent.includes('未收到音频')) {
-            dom.statusEl.textContent = `🔊 正在接收 ${id} 的音频`;
-            setTimeout(() => {
-              if (S.joined) updateStatus();
-            }, 3000);
-          }
         }
 
         // Bitrate calculation
