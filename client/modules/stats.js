@@ -60,6 +60,13 @@ export function startStatsPolling(intervalMs = 5000) {
           }
         } else if (silentBytes > 0) {
           pc._silentPolls = 0;
+          // Audio arrived — clear any stale "waiting" message from the 8s watchdog
+          if (dom.statusEl.textContent.includes('等待音频') || dom.statusEl.textContent.includes('未收到音频')) {
+            dom.statusEl.textContent = `🔊 正在接收 ${id} 的音频`;
+            setTimeout(() => {
+              if (S.joined) updateStatus();
+            }, 3000);
+          }
         }
 
         // Bitrate calculation
