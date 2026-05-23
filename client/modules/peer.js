@@ -111,10 +111,15 @@ export function makePC(peerId) {
     // interfere with autoplay.  No Web Audio fallback (iOS silently
     // blocks MediaStreamSource→destination outside gesture).
     // Level meter runs independently on listenerAudioContext.
-    const isIOS = /iPad|iPhone|iPod|EdgiOS|FxiOS|CriOS/.test(navigator.userAgent) ||
+    // Edge on iOS uses WebKit but may handle autoplay differently from
+    // Safari — skip the iOS-special path and let it try <audio> + Web
+    // Audio fallback like non-iOS browsers.
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isSafari = /Safari/.test(navigator.userAgent) && !/EdgiOS|FxiOS|CriOS/.test(navigator.userAgent);
+    const useIOSAudioPath = isIOS && isSafari;
 
-    if (isIOS) {
+    if (useIOSAudioPath) {
       let audio = document.getElementById('audio-' + peerId);
       if (audio) audio.remove();
       audio = document.createElement('audio');
