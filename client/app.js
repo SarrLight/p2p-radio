@@ -158,7 +158,12 @@ if (muteBtn) {
   muteBtn.addEventListener('click', () => {
     S.listenerMuted = !S.listenerMuted;
     if (S.listenerGainNode) S.listenerGainNode.gain.value = S.listenerMuted ? 0 : 1;
-    document.querySelectorAll('#remotes audio').forEach(a => { a.muted = S.listenerMuted; });
+    document.querySelectorAll('#remotes audio').forEach(a => {
+      a.muted = S.listenerMuted;
+      // Unmuting is a fresh user gesture — retry .play() to kickstart
+      // audio on Edge iOS where the initial ontrack .play() was blocked.
+      if (!S.listenerMuted) a.play().catch(() => {});
+    });
     muteBtn.textContent = S.listenerMuted ? '🔇 已静音' : '🔊 收听中';
     muteBtn.classList.toggle('muted', S.listenerMuted);
   });

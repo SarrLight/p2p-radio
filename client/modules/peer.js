@@ -152,22 +152,10 @@ export function makePC(peerId) {
         console.log(`[${peerId}] iOS <audio> play() OK`);
       } else {
         audioDebug.audioPlayResult = 'blocked';
-        // Edge iOS: neither <audio> retry nor Web Audio works alone on
-        // the first join, but BOTH together unlock the audio session.
-        // Keep <audio> in DOM (for mute) + connect Web Audio (primes
-        // the session) + retry <audio> (produces actual output).
-        console.log(`[${peerId}] iOS blocked, using dual path (WA + <audio> retry)`);
-        try {
-          if (S.remoteAudioSources[peerId]) S.remoteAudioSources[peerId].disconnect();
-          if (S.listenerAudioContext) {
-            const source = S.listenerAudioContext.createMediaStreamSource(stream);
-            ensureListenerGain();
-            source.connect(S.listenerGainNode || S.listenerAudioContext.destination);
-            S.remoteAudioSources[peerId] = source;
-          }
-        } catch (err) {
-          console.warn(`[${peerId}] Web Audio path failed`, err);
-        }
+        console.log(`[${peerId}] iOS <audio> blocked, awaiting user gesture (mute btn etc.)`);
+        // No Web Audio — <audio> stays in DOM.  First .play() is blocked
+        // outside gesture, but the mute/unmute button click is a fresh
+        // user gesture that will retry .play() via the mute handler.
         if (!isSafari) {
           setTimeout(() => audio.play().catch(() => {}), 500);
           setTimeout(() => audio.play().catch(() => {}), 2000);
