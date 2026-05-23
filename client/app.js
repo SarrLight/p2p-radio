@@ -56,9 +56,10 @@ dom.joinBtn.onclick = async () => {
       S.listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)();
       S.listenerAudioContext.resume().catch(() => {});
     } catch (_) {}
-    // Prime the audio session: connect a silent oscillator while still
-    // inside the gesture. Edge/Chrome on iOS won't activate the audio
-    // output path otherwise, even with a 'running' AudioContext.
+    // Prime the audio session: keep a silent oscillator running until
+    // ontrack actually plays audio.  Edge iOS deactivates the audio
+    // output path if nothing is connected to destination between the
+    // gesture and the async ontrack callback.
     if (S.listenerAudioContext && S.listenerAudioContext.state === 'running') {
       try {
         const ctx = S.listenerAudioContext;
@@ -68,7 +69,11 @@ dom.joinBtn.onclick = async () => {
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start();
-        setTimeout(() => { try { osc.stop(); osc.disconnect(); gain.disconnect(); } catch(_) {} }, 50);
+        // Store reference so ontrack can stop it when real audio starts
+        S._primeOsc = osc;
+        S._primeGain = gain;
+        // Safety cleanup after 30s (ontrack should have fired by then)
+        setTimeout(() => { if (S._primeOsc) { try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {} S._primeOsc = null; S._primeGain = null; } }, 30000);
       } catch (_) {}
     }
   }

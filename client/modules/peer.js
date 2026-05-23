@@ -92,6 +92,14 @@ export function makePC(peerId) {
     const stream = e.streams[0];
     const audioTracks = stream.getAudioTracks();
     console.log(`[${peerId}] ontrack fired, stream has ${audioTracks.length} audio tracks`);
+
+    // Stop the priming oscillator (Edge iOS audio session unlocker)
+    if (S._primeOsc) {
+      try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {}
+      S._primeOsc = null;
+      S._primeGain = null;
+    }
+
     audioTracks.forEach((t, i) => {
       console.log(`[${peerId}] audio track[${i}]: id=${t.id}, kind=${t.kind}, enabled=${t.enabled}, muted=${t.muted}, readyState=${t.readyState}`);
     });

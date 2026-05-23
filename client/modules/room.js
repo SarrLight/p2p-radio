@@ -56,6 +56,13 @@ export function leaveRoom() {
       S.localPreviewAudio = null;
     }
 
+    // Stop priming oscillator if still running
+    if (S._primeOsc) {
+      try { S._primeOsc.stop(); S._primeOsc.disconnect(); S._primeGain.disconnect(); } catch(_) {}
+      S._primeOsc = null;
+      S._primeGain = null;
+    }
+
     S.joined = false;
     S.myId = undefined;
 
