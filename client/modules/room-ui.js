@@ -54,7 +54,7 @@ export function updateRoleSelectorForRoom(roomName) {
   const listenerBtn = document.getElementById('role-listener');
   if (!hostBtn || !listenerBtn) return;
 
-  if (info && info.hasHost && S.myRole !== 'host') {
+  if (info && info.hasHost) {
     hostBtn.disabled = true;
     hostBtn.classList.add('locked');
     listenerBtn.classList.add('active');

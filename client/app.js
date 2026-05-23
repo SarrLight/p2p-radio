@@ -201,7 +201,11 @@ async function tryAutoRejoin() {
     dom.roomInput.value = savedRoom;
     S.myRole = savedRole;
 
-    if (savedRole === 'host') {
+    // Check if room already has a host (roomData populated by fetchRooms)
+    // This may change S.myRole to 'listener'
+    updateRoleSelectorForRoom(savedRoom);
+
+    if (S.myRole === 'host') {
       document.getElementById('role-host').classList.add('active');
       document.getElementById('role-listener').classList.remove('active');
     } else {
