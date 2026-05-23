@@ -168,9 +168,11 @@ export function makePC(peerId) {
         } catch (err) {
           console.warn(`[${peerId}] Web Audio fallback failed`, err);
         }
-        // Still retry <audio> after delay as a secondary effort
-        setTimeout(() => audio.play().catch(() => {}), 500);
-        setTimeout(() => audio.play().catch(() => {}), 2000);
+        // Retry <audio> only if Web Audio wasn't available
+        if (!S.listenerAudioContext) {
+          setTimeout(() => audio.play().catch(() => {}), 500);
+          setTimeout(() => audio.play().catch(() => {}), 2000);
+        }
       }
 
     } else {
