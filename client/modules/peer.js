@@ -153,25 +153,10 @@ export function makePC(peerId) {
         console.log(`[${peerId}] iOS <audio> play() OK`);
       } else {
         audioDebug.audioPlayResult = 'blocked';
-        console.log(`[${peerId}] iOS <audio> play() blocked, retrying...`);
-        // Keep <audio> in DOM for mute control.  Web Audio fallback
-        // doesn't reliably produce output on Edge iOS, but try it
-        // anyway as an additional path (gainNode controlled by mute).
-        try {
-          if (S.remoteAudioSources[peerId]) S.remoteAudioSources[peerId].disconnect();
-          if (S.listenerAudioContext) {
-            const source = S.listenerAudioContext.createMediaStreamSource(stream);
-            ensureListenerGain();
-            source.connect(S.listenerGainNode || S.listenerAudioContext.destination);
-            S.remoteAudioSources[peerId] = source;
-            audioDebug.path = 'web-audio-fallback+retry';
-            console.log(`[${peerId}] Web Audio fallback (aux, <audio> retry pending)`);
-          }
-        } catch (err) {
-          console.warn(`[${peerId}] Web Audio fallback failed`, err);
-        }
-        // Edge/Chrome iOS: retry <audio> after delay — this is what
-        // actually produces sound (Web Audio doesn't work reliably).
+        console.log(`[${peerId}] iOS <audio> play() blocked, scheduling retry`);
+        // Web Audio fallback doesn't work on iOS outside gesture — skip it.
+        // <audio> stays in DOM for mute control; retry after delay works
+        // once iOS registers the page interaction for autoplay.
         if (!isSafari) {
           setTimeout(() => audio.play().catch(() => {}), 500);
           setTimeout(() => audio.play().catch(() => {}), 2000);
