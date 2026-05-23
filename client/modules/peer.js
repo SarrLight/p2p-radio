@@ -111,7 +111,7 @@ export function makePC(peerId) {
     // expiry is stricter — retry gives the browser time to register
     // the page interaction for autoplay).
     // Non-iOS: <audio> + await .play(), fall back to Web Audio if blocked.
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    const isIOS = /iPad|iPhone|iPod|EdgiOS|FxiOS|CriOS/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const isSafari = /Safari/.test(navigator.userAgent) && !/EdgiOS|FxiOS|CriOS/.test(navigator.userAgent);
 

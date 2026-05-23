@@ -49,16 +49,16 @@ dom.joinBtn.onclick = async () => {
 
   // iOS Safari: AudioContext MUST be created inside the user gesture
   {
-    if (!S.listenerAudioContext || S.listenerAudioContext.state === 'closed') {
-      try { S.listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
-    }
-    if (S.listenerAudioContext && S.listenerAudioContext.state !== 'running') {
+    // Always create a fresh AudioContext inside the user gesture.
+    // The one from tryAutoRejoin (pageshow) was created outside gesture
+    // and Edge iOS may not fully trust it even after .resume().
+    try {
+      S.listenerAudioContext = new (window.AudioContext || window.webkitAudioContext)();
       S.listenerAudioContext.resume().catch(() => {});
-    }
-    // Prime the audio session on iOS: connect a silent oscillator to
-    // destination while we're still inside the user gesture. Without this,
-    // Edge/Chrome on iOS may not activate the audio output path even if
-    // the AudioContext state reports 'running'.
+    } catch (_) {}
+    // Prime the audio session: connect a silent oscillator while still
+    // inside the gesture. Edge/Chrome on iOS won't activate the audio
+    // output path otherwise, even with a 'running' AudioContext.
     if (S.listenerAudioContext && S.listenerAudioContext.state === 'running') {
       try {
         const ctx = S.listenerAudioContext;
