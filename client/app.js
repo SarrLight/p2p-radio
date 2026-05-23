@@ -55,6 +55,22 @@ dom.joinBtn.onclick = async () => {
     if (S.listenerAudioContext && S.listenerAudioContext.state !== 'running') {
       S.listenerAudioContext.resume().catch(() => {});
     }
+    // Prime the audio session on iOS: connect a silent oscillator to
+    // destination while we're still inside the user gesture. Without this,
+    // Edge/Chrome on iOS may not activate the audio output path even if
+    // the AudioContext state reports 'running'.
+    if (S.listenerAudioContext && S.listenerAudioContext.state === 'running') {
+      try {
+        const ctx = S.listenerAudioContext;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        setTimeout(() => { try { osc.stop(); osc.disconnect(); gain.disconnect(); } catch(_) {} }, 50);
+      } catch (_) {}
+    }
   }
 
   connectWs();
