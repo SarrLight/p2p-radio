@@ -106,47 +106,40 @@ export function makePC(peerId) {
     }
 
     // ── Playback path selection ──────────────────────────────────────
-    // iOS: <audio playsinline autoplay> works after page interaction.
-    // Do NOT call .play() — outside user gesture it rejects and may
-    // interfere with autoplay.  No Web Audio fallback (iOS silently
-    // blocks MediaStreamSource→destination outside gesture).
-    // Level meter runs independently on listenerAudioContext.
-    // Edge on iOS uses WebKit but may handle autoplay differently from
-    // Safari — skip the iOS-special path and let it try <audio> + Web
-    // Audio fallback like non-iOS browsers.
+    // Safari on iOS: <audio playsinline autoplay> + fire-and-forget .play().
+    // Edge/Chrome on iOS: <audio> + delayed .play() retry (their gesture
+    // expiry is stricter — retry gives the browser time to register
+    // the page interaction for autoplay).
+    // Non-iOS: <audio> + await .play(), fall back to Web Audio if blocked.
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const isSafari = /Safari/.test(navigator.userAgent) && !/EdgiOS|FxiOS|CriOS/.test(navigator.userAgent);
-    const useIOSAudioPath = isIOS && isSafari;
 
-    if (useIOSAudioPath) {
-      let audio = document.getElementById('audio-' + peerId);
-      if (audio) audio.remove();
-      audio = document.createElement('audio');
-      audio.id = 'audio-' + peerId;
-      audio.autoplay = true;
-      audio.muted = false;
-      audio.volume = 1.0;
-      audio.playsInline = true;
-      audio.setAttribute('playsinline', '');
-      dom.remotes.appendChild(audio);
-      audio.srcObject = stream;
-      // Fire-and-forget play() as a hint; don't await — rejection is harmless
+    // --- Common: create <audio> element ---
+    let audio = document.getElementById('audio-' + peerId);
+    if (audio) audio.remove();
+    audio = document.createElement('audio');
+    audio.id = 'audio-' + peerId;
+    audio.autoplay = true;
+    audio.muted = false;
+    audio.volume = 1.0;
+    audio.playsInline = true;
+    audio.setAttribute('playsinline', '');
+    dom.remotes.appendChild(audio);
+    audio.srcObject = stream;
+
+    if (isIOS) {
+      // iOS all browsers: <audio> path, no Web Audio fallback (silently blocked)
       audio.play().catch(() => {});
-      console.log(`[${peerId}] iOS: <audio> playback (autoplay+playsinline)`);
-    } else {
-      let audio = document.getElementById('audio-' + peerId);
-      if (audio) audio.remove();
-      audio = document.createElement('audio');
-      audio.id = 'audio-' + peerId;
-      audio.autoplay = true;
-      audio.muted = false;
-      audio.volume = 1.0;
-      audio.playsInline = true;
-      audio.setAttribute('playsinline', '');
-      dom.remotes.appendChild(audio);
-      audio.srcObject = stream;
+      // Edge/Chrome iOS may need a retry — gesture expiry is stricter
+      if (!isSafari) {
+        setTimeout(() => audio.play().catch(() => {}), 500);
+        setTimeout(() => audio.play().catch(() => {}), 2000);
+      }
+      console.log(`[${peerId}] iOS <audio> playback`);
 
+    } else {
+      // Non-iOS: try <audio>, fall back to Web Audio if blocked
       const played = await audio.play().then(() => true).catch(() => false);
       if (!played) {
         console.log(`[${peerId}] audio.play() blocked, switching to Web Audio`);
