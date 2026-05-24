@@ -6,7 +6,6 @@ export const dom = {
   toggleMicBtn: document.getElementById('toggle-mic'),
   toggleSystemBtn: document.getElementById('toggle-system'),
   statusEl: document.getElementById('status'),
-  accessUrlEl: document.getElementById('access-url'),
   playbackMeterFillEl: document.getElementById('playback-meter-fill'),
   playbackMeterTextEl: document.getElementById('playback-meter-text'),
   playbackMeterStateEl: document.getElementById('playback-meter-state'),

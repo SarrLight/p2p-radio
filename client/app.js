@@ -1,5 +1,5 @@
 import { dom, S, servers, audioDebug } from './modules/state.js';
-import { launchFireworks, updateStatus, setPlaybackMeter, updateAccessUrl } from './modules/ui.js';
+import { launchFireworks, updateStatus, setPlaybackMeter, initStunServer } from './modules/ui.js';
 import { fetchRooms, startRoomPolling } from './modules/room-ui.js';
 import { enableMic, disableMic, enableSystemAudio, disableSystemAudio } from './modules/audio.js';
 import { connectWs } from './modules/ws.js';
@@ -200,7 +200,7 @@ document.getElementById('copy-link').addEventListener('click', async () => {
 // ── Initialization ─────────────────────────────────────────────────────
 dom.toggleMicBtn.disabled = true;
 dom.toggleSystemBtn.disabled = true;
-updateAccessUrl();
+initStunServer();
 
 // If URL has a hash (shared link), pre-fill the room name
 const hashRoom = (() => { try { return decodeURIComponent(location.hash.slice(1)); } catch(_) { return ''; } })();

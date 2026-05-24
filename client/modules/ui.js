@@ -209,28 +209,16 @@ export function setPlaybackMeter(levelPercent, dbfs, isActive) {
   }
 }
 
-// ── Access URL (local STUN discovery) ───────────────────────────────────
-export function updateAccessUrl() {
-  if (!dom.accessUrlEl) return;
-
-  dom.accessUrlEl.textContent = `当前访问地址：读取中...`;
-
+// ── Local STUN discovery ─────────────────────────────────────────────────
+export function initStunServer() {
   fetch('/api/access-url')
     .then((response) => response.json())
     .then((data) => {
-      if (data && data.url) {
-        const interfaceText = data.preferredInterface ? `（网卡：${data.preferredInterface}）` : '';
-        dom.accessUrlEl.textContent = `手机访问地址（推荐）：${data.url}${interfaceText}`;
-      } else {
-        dom.accessUrlEl.textContent = `当前访问地址：${location.origin}`;
-      }
       if (data && data.preferredAddress) {
         servers.iceServers[0].urls = `stun:${data.preferredAddress}:3478`;
       }
     })
-    .catch(() => {
-      dom.accessUrlEl.textContent = `当前访问地址：${location.origin}`;
-    });
+    .catch(() => {});
 }
 
 // ── Listener gain ───────────────────────────────────────────────────────
