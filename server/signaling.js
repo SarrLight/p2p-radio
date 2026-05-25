@@ -16,14 +16,46 @@ function log(level, ...args) {
   const prefix = { debug: 'DBG', info: 'INF', warn: 'WRN', error: 'ERR' }[level] || 'LOG';
   console.log(`[${ts}] [${prefix}]`, ...args);
 }
-function getClientIp(ws) {
-  try { return ws._socket?.remoteAddress || '?'; } catch (_) { return '?'; }
+function getClientIp(ws, req) {
+  // Behind Caddy reverse proxy: read X-Forwarded-For
+  const forwarded = req?.headers?.['x-forwarded-for'];
+  if (forwarded) {
+    const first = forwarded.split(',')[0].trim();
+    if (first) return cleanIp(first);
+  }
+  try { return cleanIp(ws._socket?.remoteAddress || '?'); } catch (_) { return '?'; }
 }
+
+function cleanIp(ip) {
+  // Strip IPv4-mapped IPv6 prefix (::ffff:1.2.3.4 → 1.2.3.4)
+  return String(ip).replace(/^::ffff:/, '');
+}
+
+// ── File access log ──────────────────────────────────────────────────
+const ACCESS_LOG = '/var/log/p2p-radio/access.log';
+const accessLogStream = fs.createWriteStream(ACCESS_LOG, { flags: 'a' });
+
+function writeAccessLog(event, details) {
+  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const parts = [`[${ts}]`, `[${event}]`];
+  for (const [k, v] of Object.entries(details)) {
+    const val = String(v).includes(' ') ? `"${v}"` : v;
+    parts.push(`${k}=${val}`);
+  }
+  accessLogStream.write(parts.join(' ') + '\n');
+}
+
+writeAccessLog('SERVER START', { pid: process.pid });
 
 const app = express();
 
-// HTTP request logging
+// Trust Caddy reverse proxy — req.ip reads X-Forwarded-For correctly
+app.set('trust proxy', 1);
+
+// HTTP request logging (skip polling endpoints — too noisy)
+const POLL_SKIP = new Set(['/api/rooms', '/api/stats']);
 app.use((req, res, next) => {
+  if (POLL_SKIP.has(req.path)) { next(); return; }
   const start = Date.now();
   res.on('finish', () => {
     log('info', `${req.method} ${req.path} → ${res.statusCode} ${Date.now()-start}ms (${req.ip})`);
@@ -41,6 +73,43 @@ app.use((req, res, next) => {
   }
   next();
 });
+// ── Daily visitor tracking ────────────────────────────────────────────
+const dailyVisitors = new Map(); // dateString -> Set(ip)
+const dailyRooms = new Map();    // dateString -> Set(roomName)
+
+function getDateStr() { return new Date().toISOString().slice(0, 10); }
+
+function trackVisit(ip) {
+  const date = getDateStr();
+  if (!dailyVisitors.has(date)) dailyVisitors.set(date, new Set());
+  dailyVisitors.get(date).add(ip);
+}
+
+function getTodayVisitors() {
+  return dailyVisitors.get(getDateStr())?.size || 0;
+}
+
+function trackRoom(name) {
+  const date = getDateStr();
+  if (!dailyRooms.has(date)) dailyRooms.set(date, new Set());
+  dailyRooms.get(date).add(name);
+}
+
+function getTodayRooms() {
+  return dailyRooms.get(getDateStr())?.size || 0;
+}
+
+// Track page visits (index.html) on HTTP requests — before static
+// so it runs before express.static serves the file.
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path === '/index.html') {
+    const visitIp = req.ip.replace(/^::ffff:/, '');
+    trackVisit(visitIp);
+    writeAccessLog('VISIT', { ip: visitIp, ua: req.get('User-Agent') || '-' });
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, '..', 'client'), {
   etag: false,
   lastModified: false,
@@ -147,13 +216,45 @@ const wss = new WebSocket.Server({ server });
 let nextClientId = 1;
 const rooms = {};       // room -> Map(clientId -> ws)
 const roomReactions = {}; // room -> { emoji: count }
+const roomCreatedAt = new Map(); // roomName -> timestamp
+
+function deleteRoom(roomName) {
+  if (!rooms[roomName]) return;
+  const createdAt = roomCreatedAt.get(roomName);
+  if (createdAt) {
+    const durationSec = Math.round((Date.now() - createdAt) / 1000);
+    const hours = Math.floor(durationSec / 3600);
+    const mins = Math.floor((durationSec % 3600) / 60);
+    const secs = durationSec % 60;
+    const durationStr = hours > 0 ? `${hours}h${mins}m` : mins > 0 ? `${mins}m${secs}s` : `${secs}s`;
+    writeAccessLog('ROOM END', { name: roomName, duration: durationStr });
+    roomCreatedAt.delete(roomName);
+  }
+  delete rooms[roomName];
+  delete roomReactions[roomName];
+}
+
+// ── Stats endpoint ────────────────────────────────────────────────────
+app.get('/api/stats', (req, res) => {
+  res.json({
+    todayVisitors: getTodayVisitors(),
+    todayRooms: getTodayRooms(),
+  });
+});
 
 // Track connection count for monitoring
 let totalConnections = 0;
 let activeConnections = 0;
 
 wss.on('connection', (ws, req) => {
-  const clientIp = req?.socket?.remoteAddress || 'unknown';
+  const clientIp = (() => {
+    const forwarded = req?.headers?.['x-forwarded-for'];
+    if (forwarded) {
+      const first = forwarded.split(',')[0].trim();
+      if (first) return first.replace(/^::ffff:/, '');
+    }
+    return (req?.socket?.remoteAddress || 'unknown').replace(/^::ffff:/, '');
+  })();
   const ua = req?.headers?.['user-agent'] || 'unknown';
   totalConnections++;
   activeConnections++;
@@ -184,11 +285,11 @@ wss.on('connection', (ws, req) => {
       if (ws.room && rooms[ws.room] && rooms[ws.room].has(ws.id)) {
         log('debug', `[room:${ws.room}] Removing stale entry for ${ws.id}`);
         rooms[ws.room].delete(ws.id);
-        if (rooms[ws.room].size === 0) { delete rooms[ws.room]; delete roomReactions[ws.room]; }
+        if (rooms[ws.room].size === 0) { deleteRoom(ws.room); }
       }
 
       ws.room = room;
-      if (!rooms[room]) { rooms[room] = new Map(); roomReactions[room] = { '😭': 0, '👍': 0, '❤️': 0, '🥰': 0, '🥳': 0 }; }
+      if (!rooms[room]) { rooms[room] = new Map(); roomReactions[room] = { '😭': 0, '👍': 0, '❤️': 0, '🥰': 0, '🥳': 0 }; roomCreatedAt.set(room, Date.now()); trackRoom(room); writeAccessLog('ROOM CREATE', { name: room, ip: clientIp }); }
 
       // Enforce single host per room: downgrade to listener if a host already exists.
       // Clean up stale hosts whose WebSocket is no longer open (e.g. page refresh).
@@ -239,7 +340,7 @@ wss.on('connection', (ws, req) => {
         const remaining = rooms[ws.room].size;
         if (remaining === 0) {
           log('info', `[room:${ws.room}] Room empty, deleting`);
-          delete rooms[ws.room]; delete roomReactions[ws.room];
+          deleteRoom(ws.room);
         } else {
           log('debug', `[room:${ws.room}] ${remaining} peers remaining after leave`);
         }
@@ -302,7 +403,7 @@ wss.on('connection', (ws, req) => {
       }
       if (rooms[room].size === 0) {
         log('info', `[room:${room}] Room empty after close, deleting`);
-        delete rooms[room]; delete roomReactions[room];
+        deleteRoom(room);
       }
     }
   });

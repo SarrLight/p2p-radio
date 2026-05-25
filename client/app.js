@@ -1,6 +1,6 @@
 import { dom, S, servers, audioDebug } from './modules/state.js';
 import { launchFireworks, updateStatus, setPlaybackMeter, initStunServer } from './modules/ui.js';
-import { fetchRooms, startRoomPolling } from './modules/room-ui.js';
+import { fetchRooms, startRoomPolling, startStatsPolling } from './modules/room-ui.js';
 import { enableMic, disableMic, enableSystemAudio, disableSystemAudio } from './modules/audio.js';
 import { connectWs } from './modules/ws.js';
 import { leaveRoom } from './modules/room.js';
@@ -210,6 +210,7 @@ if (hashRoom && !S.joined) {
 
 updateStatus();
 startRoomPolling();
+startStatsPolling();
 
 // ── Auto-rejoin on page refresh ────────────────────────────────────────
 async function tryAutoRejoin() {

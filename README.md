@@ -78,10 +78,11 @@ npm start               # 自动检测证书，输出 https://…
      │                                      │
      └── WebSocket ─── 信令服务器 ── WebSocket ─┘
                        (Node.js)
-                       ├── HTTP (3000)    静态文件
+                       ├── HTTP (3000)    静态文件 / API
                        ├── WebSocket      信令 + 表情广播
                        ├── UDP (3478)     STUN
-                       └── HTTPS (可选)   自签名证书
+                       ├── HTTPS (可选)   自签名证书
+                       └── 访问日志       /var/log/p2p-radio/access.log
 ```
 
 音频流**不走服务器**，P2P 直连。服务器只做信令和 STUN。
@@ -101,13 +102,23 @@ npm start               # 自动检测证书，输出 https://…
 
 ```
 server/
-  signaling.js      信令 + STUN 服务器 (250 行)
+  signaling.js      信令 + STUN + 统计 + 访问日志 (475 行)
   generate-cert.js  自签名 CA + 服务器证书生成
   package.json
 
 client/
   index.html         UI（深色模式，毛玻璃卡片）
-  app.js             WebRTC + 音频管线 + 诊断 + 重连 (1600 行)
+  app.js             WebRTC + 音频管线 + 诊断 + 重连
+  modules/
+    state.js         全局状态 + DOM 引用
+    ui.js            烟花 / 电平表 / 反应动画
+    room-ui.js       电台列表轮询 + 站点统计
+    room.js          加入/离开房间逻辑
+    ws.js            WebSocket 信令连接 + 重连
+    peer.js          RTCPeerConnection 管理
+    audio.js         麦克风 / 系统音频捕获
+    sdp.js           SDP 操作（Opus 音乐模式注入）
+    stats.js         WebRTC 统计面板
 
 e2e/
   e2e_test.js       WebRTC 连通性测试
@@ -145,7 +156,7 @@ docs/
 - [x] 抖动缓冲（150-500ms 自适应）
 - [x] 活跃电台列表 + 自动发现
 - [x] 主播按钮智能锁定（已有主播时）
-- [x] 表情互动（😭👍❤️🥰🥳）+ 服务端计数
+- [x] 表情互动（😭👍❤️🥰🥳）+ 服务端计数 + 烟花 🎆
 - [x] 静音按钮
 - [x] 播放电平表（听众）/ 输入电平表（主播）
 - [x] WebSocket 断线重连（指数退避）
@@ -156,6 +167,10 @@ docs/
 - [x] HTTPS 自签名 CA 证书生成
 - [x] 多听众压力测试脚本（Playwright）
 - [x] 深色 UI + 毛玻璃卡片
+- [x] **站点统计** — header 显示今日累计到访人数和电台数
+- [x] **访问日志文件** — `/var/log/p2p-radio/access.log` 记录 VISIT、ROOM CREATE、ROOM END
+- [x] **HTTP 日志降噪** — 轮询接口（`/api/rooms`, `/api/stats`）不在 stdout 刷屏
+- [x] **反向代理真实 IP** — WebSocket 连接经 Caddy 代理后正确读取 X-Forwarded-For
 
 ### 待实现
 

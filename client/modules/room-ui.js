@@ -64,3 +64,22 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ── Site stats ──────────────────────────────────────────────────────────
+let statsInterval = null;
+
+async function fetchStats() {
+  const el = document.getElementById('header-stats');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+    el.textContent = `今日累计 ${data.todayVisitors} 人到访 · ${data.todayRooms} 台`;
+  } catch (_) {}
+}
+
+export function startStatsPolling(intervalMs = 10000) {
+  if (statsInterval) return;
+  fetchStats();
+  statsInterval = setInterval(fetchStats, intervalMs);
+}
