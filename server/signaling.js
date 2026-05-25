@@ -10,9 +10,16 @@ const dgram = require('dgram');
 // ── Logger ──────────────────────────────────────────────────────────
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info'; // debug|info|warn|error
 const levels = { debug: 0, info: 1, warn: 2, error: 3 };
+
+function localTimestamp() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 function log(level, ...args) {
   if (levels[level] < levels[LOG_LEVEL]) return;
-  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const ts = localTimestamp();
   const prefix = { debug: 'DBG', info: 'INF', warn: 'WRN', error: 'ERR' }[level] || 'LOG';
   console.log(`[${ts}] [${prefix}]`, ...args);
 }
@@ -36,7 +43,7 @@ const ACCESS_LOG = '/var/log/p2p-radio/access.log';
 const accessLogStream = fs.createWriteStream(ACCESS_LOG, { flags: 'a' });
 
 function writeAccessLog(event, details) {
-  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const ts = localTimestamp();
   const parts = [`[${ts}]`, `[${event}]`];
   for (const [k, v] of Object.entries(details)) {
     const val = String(v).includes(' ') ? `"${v}"` : v;
