@@ -98,6 +98,21 @@ npm start               # 自动检测证书，输出 https://…
 | STUN | 内嵌（无需外部 STUN 服务器） |
 | 测试 | Playwright |
 
+### 使用 CC98 账号登录
+
+1. 在 [CC98 登录中心](https://openid.cc98.org) 创建应用
+2. 授权类型选「授权码验证」，重定向地址填你的回调地址（例如 `https://zju-radio.thid.top/api/auth/callback`）
+3. 勾选 scope：`openid` + `profile`
+4. 在服务端设置以下环境变量：
+
+```
+CC98_CLIENT_ID=你的应用标识
+CC98_CLIENT_SECRET=你的应用机密
+CC98_REDIRECT_URI=https://zju-radio.thid.top/api/auth/callback
+```
+
+详细配置参考 `scripts/setup-cc98-auth.sh`。
+
 ### 项目结构
 
 ```
@@ -168,6 +183,7 @@ docs/
 - [x] 多听众压力测试脚本（Playwright）
 - [x] 深色 UI + 毛玻璃卡片
 - [x] **站点统计** — header 显示今日累计到访人数和电台数
+- [x] **CC98 OAuth 登录** — 支持 CC98 账号登录，聊天显示真人用户名
 - [x] **访问日志文件** — `/var/log/p2p-radio/access.log` 记录 VISIT、ROOM CREATE、ROOM END
 - [x] **HTTP 日志降噪** — 轮询接口（`/api/rooms`, `/api/stats`）不在 stdout 刷屏
 - [x] **反向代理真实 IP** — WebSocket 连接经 Caddy 代理后正确读取 X-Forwarded-For
