@@ -34,3 +34,5 @@ scripts/boot-fix.sh
 scripts/boot-fix.service
 scripts/install_systemd.sh
 scripts/connect_zjuwlan.sh
+
+tmp

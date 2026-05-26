@@ -37,6 +37,7 @@ export function connectWs() {
       try { history.replaceState(null, '', '#' + dom.roomInput.value); } catch (_) {}
 
       if (data.roles) S.peerRoles = { ...data.roles };
+      if (data.peerNames) S.peerNames = { ...data.peerNames };
 
       if (data.reactionCounts) {
         Object.assign(S.reactionCounts, data.reactionCounts);
@@ -112,6 +113,7 @@ export function connectWs() {
 
     } else if (data.type === 'peer-joined') {
       if (data.role) S.peerRoles[data.id] = data.role;
+      if (data.name) S.peerNames[data.id] = data.name;
       return;
 
     } else if (data.type === 'offer') {

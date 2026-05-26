@@ -45,6 +45,8 @@ export const S = {
   remoteAudioSources: {},
   myRole: 'host',
   peerRoles: {},
+  peerNames: {},
+  myUserSub: null,
   joined: false,
   listenerAudioContext: null,
   listenerGainNode: null,

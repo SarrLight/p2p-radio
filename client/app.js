@@ -214,6 +214,35 @@ updateStatus();
 startRoomPolling();
 startStatsPolling();
 
+// ── CC98 Auth check ────────────────────────────────────────────────────
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/me');
+    const data = await res.json();
+    const loginBtn = document.getElementById('login-btn');
+    const authArea = document.getElementById('auth-area');
+    if (!loginBtn || !authArea) return;
+
+    if (data.authenticated) {
+      loginBtn.style.display = 'none';
+      authArea.style.display = 'flex';
+      const nameEl = document.getElementById('user-name');
+      const avatarEl = document.getElementById('user-avatar');
+      if (nameEl) nameEl.textContent = data.user.name;
+      if (avatarEl && data.user.picture) {
+        avatarEl.src = data.user.picture;
+        avatarEl.style.display = 'inline';
+      }
+      // Store user sub for chat message ownership check
+      S.myUserSub = data.user.sub;
+    } else {
+      loginBtn.style.display = 'inline-flex';
+      authArea.style.display = 'none';
+    }
+  } catch (_) {}
+}
+checkAuth();
+
 // ── Auto-rejoin on page refresh ────────────────────────────────────────
 async function tryAutoRejoin() {
   try {

@@ -103,7 +103,8 @@ function renderMessage(msg) {
   div.dataset.msgId = msg.id;
 
   // Determine if this is the current user's message
-  const isMine = msg.senderId === S.myId;
+  // Use CC98 sub for persistent identity across reconnects
+  const isMine = (msg.userSub && S.myUserSub && msg.userSub === S.myUserSub) || msg.senderId === S.myId;
 
   const bubble = document.createElement('div');
   bubble.className = 'chat-bubble' + (isMine ? ' mine' : '');

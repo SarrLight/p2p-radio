@@ -38,6 +38,36 @@ function cleanIp(ip) {
   return String(ip).replace(/^::ffff:/, '');
 }
 
+// ── Signed cookie parser (for WebSocket upgrade requests) ─────────────
+function unsignCookie(signedValue, secret) {
+  if (!signedValue || typeof signedValue !== 'string') return null;
+  if (!signedValue.startsWith('s:')) return signedValue;
+  const unsigned = signedValue.slice(2);
+  const i = unsigned.lastIndexOf('.');
+  if (i === -1) return null;
+  const val = unsigned.slice(0, i);
+  const sig = unsigned.slice(i + 1);
+  const expected = crypto.createHmac('sha256', secret).update(val).digest('base64').replace(/=+$/, '');
+  return sig === expected ? val : null;
+}
+
+function getSessionFromReq(req) {
+  try {
+    const cookieHeader = req.headers?.cookie;
+    if (!cookieHeader) return null;
+    const cookies = {};
+    cookieHeader.split(';').forEach(p => {
+      const [k, ...v] = p.trim().split('=');
+      if (k) cookies[k] = v.join('=');
+    });
+    const rawVal = cookies['p2p_session'];
+    if (!rawVal) return null;
+    const decodedVal = decodeURIComponent(rawVal);
+    const sid = unsignCookie(decodedVal, SESSION_SECRET);
+    return sid ? (sessions.get(sid) || null) : null;
+  } catch (_) { return null; }
+}
+
 // ── File access log ──────────────────────────────────────────────────
 const ACCESS_LOG = '/var/log/p2p-radio/access.log';
 const accessLogStream = fs.createWriteStream(ACCESS_LOG, { flags: 'a' });
@@ -54,10 +84,100 @@ function writeAccessLog(event, details) {
 
 writeAccessLog('SERVER START', { pid: process.pid });
 
+const crypto = require('crypto');
+
 const app = express();
 
 // Trust Caddy reverse proxy — req.ip reads X-Forwarded-For correctly
 app.set('trust proxy', 1);
+
+// ── CC98 OAuth config ─────────────────────────────────────────────────
+const CC98_CLIENT_ID = process.env.CC98_CLIENT_ID;
+const CC98_CLIENT_SECRET = process.env.CC98_CLIENT_SECRET;
+const CC98_REDIRECT_URI = process.env.CC98_REDIRECT_URI || 'http://localhost:3000/api/auth/callback';
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const sessions = new Map(); // sessionId -> userInfo
+
+app.use(require('cookie-parser')(SESSION_SECRET));
+
+// Auth middleware
+function getSession(req) {
+  const sid = req.signedCookies?.p2p_session;
+  if (!sid) return null;
+  return sessions.get(sid) || null;
+}
+
+// Login — redirect to CC98
+app.get('/api/auth/login', (req, res) => {
+  const params = new URLSearchParams({
+    client_id: CC98_CLIENT_ID,
+    redirect_uri: CC98_REDIRECT_URI,
+    response_type: 'code',
+    scope: 'openid profile',
+    state: crypto.randomBytes(16).toString('hex'),
+  });
+  res.redirect(`https://openid.cc98.org/connect/authorize?${params}`);
+});
+
+// Callback — handle OAuth code exchange
+app.get('/api/auth/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).send('缺少授权码');
+
+  try {
+    const tokenRes = await fetch('https://openid.cc98.org/connect/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: CC98_CLIENT_ID,
+        client_secret: CC98_CLIENT_SECRET,
+        code,
+        redirect_uri: CC98_REDIRECT_URI,
+        grant_type: 'authorization_code',
+      }),
+    });
+    const tokenData = await tokenRes.json();
+
+    // Decode ID token to get user info
+    const payload = tokenData.id_token?.split('.')[1];
+    if (!payload) { log('error', 'No id_token in response'); return res.status(500).send('认证失败'); }
+    const userInfo = JSON.parse(Buffer.from(payload, 'base64url').toString());
+
+    const sid = crypto.randomBytes(24).toString('hex');
+    sessions.set(sid, {
+      sub: userInfo.sub,
+      name: userInfo.name || userInfo.preferred_username,
+      picture: userInfo.picture || null,
+      loginTime: Date.now(),
+    });
+    log('info', `CC98 login: ${userInfo.name || userInfo.preferred_username}`);
+    res.cookie('p2p_session', sid, {
+      signed: true, httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      sameSite: 'lax',
+    });
+    log('info', `CC98 login: ${userInfo.name || userInfo.preferred_username}`);
+    res.redirect('/');
+  } catch (err) {
+    log('error', 'CC98 callback error:', err.message);
+    res.status(500).send('认证失败');
+  }
+});
+
+// Get current user
+app.get('/api/auth/me', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.json({ authenticated: false });
+  res.json({ authenticated: true, user: { name: session.name, picture: session.picture, sub: session.sub } });
+});
+
+// Logout
+app.get('/api/auth/logout', (req, res) => {
+  const sid = req.signedCookies?.p2p_session;
+  if (sid) sessions.delete(sid);
+  res.clearCookie('p2p_session');
+  res.redirect('/');
+});
 
 // HTTP request logging (skip polling endpoints — too noisy)
 const POLL_SKIP = new Set(['/api/rooms', '/api/stats']);
@@ -268,7 +388,15 @@ wss.on('connection', (ws, req) => {
   const ua = req?.headers?.['user-agent'] || 'unknown';
   totalConnections++;
   activeConnections++;
-  log('info', `WS connect  #${totalConnections} active=${activeConnections} ip=${clientIp} ua=${ua.slice(0,80)}`);
+
+  // Read CC98 session from cookie
+  const session = getSessionFromReq(req);
+  if (session) {
+    ws.user = { name: session.name, picture: session.picture, sub: session.sub };
+    log('info', `WS connect (CC98: ${session.name}) #${totalConnections} active=${activeConnections} ip=${clientIp}`);
+  } else {
+    log('info', `WS connect  #${totalConnections} active=${activeConnections} ip=${clientIp} ua=${ua.slice(0,80)}`);
+  }
 
   ws.id = null;
   ws.room = null;
@@ -318,15 +446,27 @@ wss.on('connection', (ws, req) => {
 
       // build roles snapshot for the joining client
       const roles = {};
+      const peerNames = {};
       for (const [pid, pws] of rooms[room]) {
         roles[pid] = pws.role || 'host';
+        if (pws.user?.name) peerNames[pid] = pws.user.name;
       }
+      // Add own name if available
+      if (ws.user?.name) peerNames[ws.id] = ws.user.name;
       const peers = Array.from(rooms[room].keys());
       rooms[room].set(ws.id, ws);
 
       log('info', `[room:${room}] Joined as ${yourRole}, peers=[${peers.join(',')}]`);
 
-      ws.send(JSON.stringify({ type: 'joined', id: ws.id, peers, roles, yourRole, reactionCounts: roomReactions[room] }));
+      ws.send(JSON.stringify({
+        type: 'joined',
+        id: ws.id,
+        peers,
+        roles,
+        peerNames,
+        yourRole,
+        reactionCounts: roomReactions[room],
+      }));
 
       // Send chat history
       const history = roomMessages[room] || [];
@@ -337,7 +477,12 @@ wss.on('connection', (ws, req) => {
       // notify existing peers
       for (const [id, other] of rooms[room]) {
         if (id !== ws.id && other.readyState === WebSocket.OPEN) {
-          other.send(JSON.stringify({ type: 'peer-joined', id: ws.id, role: ws.role || 'host' }));
+          other.send(JSON.stringify({
+            type: 'peer-joined',
+            id: ws.id,
+            role: ws.role || 'host',
+            name: ws.user?.name || null,
+          }));
           log('debug', `[room:${room}] Notified peer ${id} about new peer ${ws.id}`);
         }
       }
@@ -394,13 +539,15 @@ wss.on('connection', (ws, req) => {
       const text = (data.text || '').trim();
       if (!text) return;
       // Build sender label
-      const roleLabel = ws.role === 'host' ? '主播' : '听众';
-      const senderLabel = ws.role === 'host' ? '🟢 主播' : `👤 听众 #${ws.id}`;
+      const cc98Name = ws.user?.name;
+      const senderLabel = ws.role === 'host'
+        ? (cc98Name ? `🟢 ${cc98Name}` : '🟢 主播')
+        : (cc98Name ? `👤 ${cc98Name}` : `👤 听众 #${ws.id}`);
       const now = new Date();
       const pad = n => String(n).padStart(2, '0');
       const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
       const msgId = Date.now() + '_' + ws.id;
-      const msg = { id: msgId, senderId: ws.id, senderLabel, text, time };
+      const msg = { id: msgId, senderId: ws.id, senderLabel, text, time, userSub: ws.user?.sub || null };
       // Store in room history
       if (!roomMessages[room]) roomMessages[room] = [];
       roomMessages[room].push(msg);
