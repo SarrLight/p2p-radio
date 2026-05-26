@@ -4,6 +4,7 @@ import { fetchRooms, startRoomPolling, startStatsPolling } from './modules/room-
 import { enableMic, disableMic, enableSystemAudio, disableSystemAudio } from './modules/audio.js';
 import { connectWs } from './modules/ws.js';
 import { leaveRoom } from './modules/room.js';
+import { initChat, showChat } from './modules/chat.js';
 
 // ── Copy stats button ──────────────────────────────────────────────────
 if (dom.statsCopyBtn) {
@@ -201,6 +202,7 @@ document.getElementById('copy-link').addEventListener('click', async () => {
 dom.toggleMicBtn.disabled = true;
 dom.toggleSystemBtn.disabled = true;
 initStunServer();
+initChat();
 
 // If URL has a hash (shared link), pre-fill the room name
 const hashRoom = (() => { try { return decodeURIComponent(location.hash.slice(1)); } catch(_) { return ''; } })();

@@ -175,6 +175,18 @@
     /* ── utility ── */
     .hidden{display:none!important}
     #room-list.disabled{opacity:0.4;pointer-events:none}
+
+    /* ── chat ── */
+    #chat-messages{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent}
+    #chat-msg-list{display:flex;flex-direction:column;gap:6px;padding:4px 0}
+    .chat-msg{display:flex;flex-direction:column}
+    .chat-msg.system{align-items:center}
+    .chat-bubble{max-width:85%;padding:8px 12px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.04)}
+    .chat-bubble.mine{align-self:flex-end;background:rgba(74,222,128,.1);border-color:rgba(74,222,128,.15)}
+    .chat-header{font-size:11px;color:var(--text-muted);margin-bottom:3px;font-weight:500}
+    .chat-bubble.mine .chat-header{color:rgba(74,222,128,.7)}
+    .chat-body{font-size:14px;line-height:1.4;word-break:break-word;white-space:pre-wrap}
+    .chat-system{font-size:12px;color:var(--text-muted);padding:4px 12px;background:rgba(255,255,255,.03);border-radius:999px;text-align:center}
   </style>
 </head>
 <body>
@@ -247,6 +259,18 @@
       <button id="firework-btn" class="hidden" title="放烟花">🎆</button>
     </div>
     <div id="peer-summary" style="margin-top:8px"></div>
+  </div>
+
+  <!-- chat -->
+  <div class="card" id="chat-card" style="display:none">
+    <div class="card-header"><span>💬 聊天</span></div>
+    <div id="chat-messages" style="max-height:280px;overflow-y:auto;margin-bottom:8px;display:flex;flex-direction:column">
+      <div id="chat-msg-list"></div>
+    </div>
+    <div style="display:flex;gap:6px">
+      <input type="text" id="chat-input" placeholder="发消息…" disabled style="flex:1;padding:7px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--text);font-size:14px;outline:none">
+      <button id="chat-send-btn" class="btn-primary" style="padding:7px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;background:var(--accent);color:#000;white-space:nowrap">发送</button>
+    </div>
   </div>
 
   <!-- diagnostics -->

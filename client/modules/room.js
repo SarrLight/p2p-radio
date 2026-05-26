@@ -4,6 +4,7 @@ import { disableMic, disableSystemAudio, stopInputMeter } from './audio.js';
 import { updateStatus, setPlaybackMeter, ensureListenerGain } from './ui.js';
 import { fetchRooms, stopRoomPolling } from './room-ui.js';
 import { stopStatsPolling } from './stats.js';
+import { hideChat } from './chat.js';
 
 export function leaveRoom() {
   // Clear saved room FIRST
@@ -89,6 +90,7 @@ export function leaveRoom() {
     document.getElementById('host-meters').style.display = 'none';
     document.getElementById('listener-meters').style.display = 'block';
     document.getElementById('reaction-bar').style.display = 'none';
+    hideChat();
 
     const muteBtn = document.getElementById('mute-btn');
     if (muteBtn) { muteBtn.classList.add('hidden'); muteBtn.textContent = '🔊 收听中'; muteBtn.classList.remove('muted'); }

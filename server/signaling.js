@@ -223,6 +223,8 @@ const wss = new WebSocket.Server({ server });
 let nextClientId = 1;
 const rooms = {};       // room -> Map(clientId -> ws)
 const roomReactions = {}; // room -> { emoji: count }
+const roomMessages = {};  // room -> [{id, senderId, senderLabel, text, time}]
+const MAX_CHAT_HISTORY = 100;
 const roomCreatedAt = new Map(); // roomName -> timestamp
 
 function deleteRoom(roomName) {
@@ -239,6 +241,7 @@ function deleteRoom(roomName) {
   }
   delete rooms[roomName];
   delete roomReactions[roomName];
+  delete roomMessages[roomName];
 }
 
 // ── Stats endpoint ────────────────────────────────────────────────────
@@ -325,6 +328,12 @@ wss.on('connection', (ws, req) => {
 
       ws.send(JSON.stringify({ type: 'joined', id: ws.id, peers, roles, yourRole, reactionCounts: roomReactions[room] }));
 
+      // Send chat history
+      const history = roomMessages[room] || [];
+      if (history.length > 0) {
+        ws.send(JSON.stringify({ type: 'chat-history', messages: history }));
+      }
+
       // notify existing peers
       for (const [id, other] of rooms[room]) {
         if (id !== ws.id && other.readyState === WebSocket.OPEN) {
@@ -378,6 +387,33 @@ wss.on('connection', (ws, req) => {
           other.send(JSON.stringify({ type: 'reaction', emoji: data.emoji, from: ws.id, count: counts[data.emoji] }));
         }
       }
+
+    } else if (type === 'chat') {
+      const room = ws.room;
+      if (!room || !rooms[room]) return;
+      const text = (data.text || '').trim();
+      if (!text) return;
+      // Build sender label
+      const roleLabel = ws.role === 'host' ? '主播' : '听众';
+      const senderLabel = ws.role === 'host' ? '🟢 主播' : `👤 听众 #${ws.id}`;
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      const msgId = Date.now() + '_' + ws.id;
+      const msg = { id: msgId, senderId: ws.id, senderLabel, text, time };
+      // Store in room history
+      if (!roomMessages[room]) roomMessages[room] = [];
+      roomMessages[room].push(msg);
+      if (roomMessages[room].length > MAX_CHAT_HISTORY) {
+        roomMessages[room] = roomMessages[room].slice(-MAX_CHAT_HISTORY);
+      }
+      // Broadcast to ALL in room (including sender, so sender gets confirmation + server timestamp)
+      for (const [, other] of rooms[room]) {
+        if (other.readyState === WebSocket.OPEN) {
+          other.send(JSON.stringify(Object.assign({}, msg, { type: 'chat' })));
+        }
+      }
+      log('debug', `[room:${room}] CHAT from=${ws.id}: ${text.slice(0,60)}`);
 
     } else if (type === 'offer' || type === 'answer' || type === 'ice') {
       const to = data.to;

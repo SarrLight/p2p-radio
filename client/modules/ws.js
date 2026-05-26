@@ -4,6 +4,7 @@ import { fetchRooms } from './room-ui.js';
 import { launchFireworks, showReaction, updateStatus, ensureListenerGain } from './ui.js';
 import { ensureAudioPipeline, startInputMeter } from './audio.js';
 import { startStatsPolling } from './stats.js';
+import { handleChatMessage, handleChatHistory, showChat } from './chat.js';
 
 export function connectWs() {
   const url = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws';
@@ -91,6 +92,7 @@ export function connectWs() {
       if (leaveBtn) leaveBtn.classList.remove('hidden');
 
       document.getElementById('reaction-bar').style.display = 'flex';
+      showChat();
       const fwBtn = document.getElementById('firework-btn');
       if (fwBtn) fwBtn.classList.toggle('hidden', S.myRole !== 'host');
       const muteBtn = document.getElementById('mute-btn');
@@ -145,6 +147,12 @@ export function connectWs() {
     } else if (data.type === 'peer-left') {
       delete S.peerRoles[data.id];
       closePeer(data.id);
+
+    } else if (data.type === 'chat') {
+      handleChatMessage(data);
+
+    } else if (data.type === 'chat-history') {
+      handleChatHistory(data.messages);
     }
   };
 
